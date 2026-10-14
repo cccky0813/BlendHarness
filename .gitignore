@@ -1,0 +1,13 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# run outputs (traces, renders, generated code)
+runs/
+
+# macOS
+.DS_Store

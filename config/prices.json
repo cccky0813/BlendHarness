@@ -1,0 +1,4 @@
+{
+  "deepseek-flash": {"input": 0.3, "cached_input": 0.006, "output": 1.2},
+  "deepseek-v4-pro": {"input": 1.32, "cached_input": 0.044, "output": 3.96}
+}
