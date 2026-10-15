@@ -4,6 +4,7 @@ Every call opens an "llm" span, so tokens, cost, latency, retries and errors are
 automatically. Agents never call the API directly; they go through LLMClient.chat().
 """
 
+import base64
 import json
 import os
 import time
@@ -66,6 +67,77 @@ class LLMResponse:
     raw_message: dict[str, Any] = field(default_factory=dict)  # to append back into messages
 
 
+@dataclass
+class _Raw:
+    """One model reply in a provider-neutral shape, whether it arrived streamed or in one piece."""
+    id: str = ""
+    text: str = ""
+    reasoning: str = ""
+    tool_calls: list[dict[str, str]] = field(default_factory=list)  # {"id", "name", "arguments"(JSON str)}
+    finish_reason: str = ""
+    usage: Any = None
+
+    @classmethod
+    def from_completion(cls, completion) -> "_Raw":
+        msg = completion.choices[0].message
+        return cls(
+            id=completion.id or "",
+            text=msg.content or "",
+            reasoning=getattr(msg, "reasoning_content", None) or (msg.model_extra or {}).get("reasoning_content") or "",
+            tool_calls=[{"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments or ""}
+                        for tc in msg.tool_calls or []],
+            finish_reason=completion.choices[0].finish_reason or "",
+            usage=completion.usage,
+        )
+
+    def assistant_message(self) -> dict[str, Any]:
+        """The assistant turn to append to the history (the API needs its tool_calls back)."""
+        m: dict[str, Any] = {"role": "assistant", "content": self.text}
+        if self.reasoning:
+            m["reasoning_content"] = self.reasoning
+        if self.tool_calls:
+            m["tool_calls"] = [{"id": tc["id"], "type": "function",
+                                "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                               for tc in self.tool_calls]
+        return m
+
+
+def image_message(text: str, image_paths: list[str], role: str = "user") -> dict[str, Any]:
+    """A multimodal chat message: text followed by images (sent inline as base64 data URLs)."""
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    for p in image_paths:
+        b64 = base64.b64encode(Path(p).read_bytes()).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        "_path": str(p)})  # private marker so payload logs can show the file instead
+    return {"role": role, "content": content}
+
+
+def _strip_private(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove our private `_path` markers before sending to the API."""
+    out = []
+    for m in messages:
+        if isinstance(m.get("content"), list):
+            m = {**m, "content": [{k: v for k, v in part.items() if k != "_path"} for part in m["content"]]}
+        out.append(m)
+    return out
+
+
+def _redact_images(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """For payload logs: replace huge base64 images with their file path."""
+    out = []
+    for m in messages:
+        if isinstance(m.get("content"), list):
+            parts = []
+            for part in m["content"]:
+                if part.get("type") == "image_url":
+                    parts.append({"type": "image_url", "image": part.get("_path", "<inline image>")})
+                else:
+                    parts.append(part)
+            m = {**m, "content": parts}
+        out.append(m)
+    return out
+
+
 CONFIG_ERROR_MARKERS = ("model_not_found",)
 
 
@@ -89,7 +161,9 @@ class LLMClient:
         max_retries: int = 3,
         timeout_s: float = 300,
         extra_body: Optional[dict[str, Any]] = None,  # provider-specific, e.g. {"reasoning_effort": "low"}
+        stream: bool = True,
     ) -> None:
+        self.stream = stream
         self.model = model
         self.tracer = tracer
         self.temperature = temperature
@@ -117,7 +191,7 @@ class LLMClient:
             completion = self._create_with_retry(messages, tools, span)
             resp = self._parse(completion)
             span.set(
-                request_id=getattr(completion, "id", None),  # provider's id: quote it in support tickets
+                request_id=completion.id or None,  # provider's id: quote it in support tickets
                 input_tokens=resp.input_tokens,
                 output_tokens=resp.output_tokens,
                 reasoning_tokens=resp.reasoning_tokens,
@@ -133,7 +207,7 @@ class LLMClient:
     def _create_with_retry(self, messages, tools, span):
         kwargs: dict[str, Any] = dict(
             model=self.model,
-            messages=messages,
+            messages=_strip_private(messages),
             temperature=self.temperature,
             max_tokens=self.max_tokens,
         )
@@ -143,7 +217,10 @@ class LLMClient:
             kwargs["extra_body"] = self.extra_body
         for attempt in range(1, self.max_retries + 1):
             try:
-                completion = self.client.chat.completions.create(**kwargs)
+                if self.stream:
+                    completion = self._stream(kwargs)
+                else:
+                    completion = _Raw.from_completion(self.client.chat.completions.create(**kwargs))
                 span.set(attempts=attempt)
                 return completion
             except RETRYABLE as exc:
@@ -156,17 +233,48 @@ class LLMClient:
                 time.sleep(wait)
             # Any other error (bad request, auth, unknown model) is our bug: fail fast, no retry.
 
-    def _parse(self, completion) -> LLMResponse:
-        choice = completion.choices[0]
-        msg = choice.message
+    def _stream(self, kwargs: dict[str, Any]) -> "_Raw":
+        """Receive the answer chunk by chunk. Data keeps flowing during long generations, so
+        proxies with a read timeout (e.g. a relay's 120 s limit -> HTTP 524) don't cut us off."""
+        stream = self.client.chat.completions.create(**kwargs, stream=True,
+                                                     stream_options={"include_usage": True})
+        raw = _Raw()
+        text, reasoning = [], []
+        calls: dict[int, dict[str, str]] = {}  # tool calls arrive in pieces, keyed by their index
+        for chunk in stream:
+            raw.id = raw.id or chunk.id
+            if chunk.usage:  # with include_usage, the last chunk carries the token counts
+                raw.usage = chunk.usage
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+            if delta.content:
+                text.append(delta.content)
+            rc = getattr(delta, "reasoning_content", None) or (delta.model_extra or {}).get("reasoning_content")
+            if rc:
+                reasoning.append(rc)
+            for tc in delta.tool_calls or []:
+                slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                slot["id"] = slot["id"] or (tc.id or "")
+                if tc.function:
+                    slot["name"] = slot["name"] or (tc.function.name or "")
+                    slot["arguments"] += tc.function.arguments or ""  # JSON string, streamed in fragments
+            if choice.finish_reason:
+                raw.finish_reason = choice.finish_reason
+        raw.text, raw.reasoning = "".join(text), "".join(reasoning)
+        raw.tool_calls = [calls[i] for i in sorted(calls)]
+        return raw
+
+    def _parse(self, completion: "_Raw") -> LLMResponse:
         tool_calls = []
-        for tc in msg.tool_calls or []:
+        for tc in completion.tool_calls:
             try:
-                args = json.loads(tc.function.arguments or "{}")
+                args = json.loads(tc["arguments"] or "{}")
             except json.JSONDecodeError:
                 # The model produced invalid JSON; keep the raw string so the loop can report it.
-                args = {"__invalid_json__": tc.function.arguments}
-            tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
+                args = {"__invalid_json__": tc["arguments"]}
+            tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=args))
 
         usage = completion.usage
         input_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -177,15 +285,15 @@ class LLMClient:
         reasoning_tokens = (getattr(out_details, "reasoning_tokens", 0) or 0) if out_details else 0
 
         return LLMResponse(
-            text=msg.content or "",
+            text=completion.text,
             tool_calls=tool_calls,
-            finish_reason=choice.finish_reason or "",
+            finish_reason=completion.finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             reasoning_tokens=reasoning_tokens,
             cached_tokens=cached_tokens,
             cost_usd=self._cost(input_tokens, output_tokens, cached_tokens),
-            raw_message=msg.model_dump(exclude_none=True),
+            raw_message=completion.assistant_message(),
         )
 
     def _cost(self, input_tokens: int, output_tokens: int, cached_tokens: int) -> Optional[float]:
@@ -205,7 +313,7 @@ class LLMClient:
         d = self.tracer.run_dir / "payloads"
         d.mkdir(exist_ok=True)
         (d / f"{span_id}.json").write_text(
-            json.dumps({"messages": messages, "tools": tools, "response": resp.raw_message},
+            json.dumps({"messages": _redact_images(messages), "tools": tools, "response": resp.raw_message},
                        ensure_ascii=False, indent=1, default=str),
             encoding="utf-8",
         )

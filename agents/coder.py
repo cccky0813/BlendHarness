@@ -24,9 +24,23 @@ Rules:
 """
 
 
+def executed_successfully(messages: list[dict]) -> str | None:
+    """Completion check: the model may only finish after a script actually ran in THIS run.
+
+    Catches the failure where the model writes the script into its reply instead of executing it.
+    """
+    ran_ok = any(m.get("role") == "tool" and str(m.get("content", "")).startswith("OK: script ran")
+                 for m in messages)
+    if ran_ok:
+        return None
+    return ("you have not successfully executed any script in this task. Writing code in your reply "
+            "does nothing; call execute_bpy with the complete script and make sure it runs.")
+
+
 def make_coder(llm: LLMClient, blender: BlenderTools, max_steps: int = 15,
                max_cost_usd: float | None = 0.5) -> AgentLoop:
     return AgentLoop(
+        completion_check=executed_successfully,
         name="coder",
         llm=llm,
         system_prompt=CODER_PROMPT,

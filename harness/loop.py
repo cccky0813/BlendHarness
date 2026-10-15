@@ -40,7 +40,7 @@ class Tool:
 
 @dataclass
 class LoopResult:
-    status: str                  # "done" | "max_steps" | "stuck" | "over_budget" | "truncated"
+    status: str                  # "done" | "unverified" | "max_steps" | "stuck" | "over_budget" | "truncated"
     final_text: str              # the model's last answer (may be empty if it never finished)
     steps: int
     cost_usd: float
@@ -58,7 +58,10 @@ class AgentLoop:
         max_steps: int = 20,
         max_same_error: int = 3,
         max_cost_usd: Optional[float] = None,
+        # messages -> None if really finished, else a reason the model is told before it continues
+        completion_check: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
     ) -> None:
+        self.completion_check = completion_check
         self.name = name
         self.llm = llm
         self.system_prompt = system_prompt
@@ -76,6 +79,7 @@ class AgentLoop:
         error_counts: dict[str, int] = {}
         cost = 0.0
         truncations = 0
+        completion_nudges = 0
 
         with self.llm.tracer.span("agent", self.name, task=task[:300]) as span:
             for step in range(1, self.max_steps + 1):
@@ -96,7 +100,16 @@ class AgentLoop:
                 truncations = 0
 
                 if not resp.tool_calls:  # no tool requested: the model considers the task finished
-                    return self._finish(span, "done", resp.text, step, cost, messages)
+                    # Don't take "I'm done" on faith: verify the completion condition if one is defined.
+                    problem = self.completion_check(messages) if self.completion_check else None
+                    if problem and completion_nudges < 2:
+                        completion_nudges += 1
+                        span.set(**{f"completion_rejected_{completion_nudges}": problem})
+                        messages.append({"role": "user", "content": f"Not finished yet: {problem}"})
+                        continue
+                    status = "done" if not problem else "unverified"
+                    return self._finish(span, status, resp.text, step, cost, messages,
+                                        reason=problem or "")
 
                 for i, call in enumerate(resp.tool_calls):
                     result = self._execute(call)
