@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from harness.context import ContextPolicy, size_chars
 from harness.llm import LLMClient, ToolCall
 
 MAX_TOOL_OUTPUT_CHARS = 6000  # keep one huge tool output from flooding the context
@@ -60,8 +61,10 @@ class AgentLoop:
         max_cost_usd: Optional[float] = None,
         # messages -> None if really finished, else a reason the model is told before it continues
         completion_check: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
+        context_policy: Optional[ContextPolicy] = None,  # full history -> what the model sees
     ) -> None:
         self.completion_check = completion_check
+        self.context_policy = context_policy
         self.name = name
         self.llm = llm
         self.system_prompt = system_prompt
@@ -83,7 +86,11 @@ class AgentLoop:
 
         with self.llm.tracer.span("agent", self.name, task=task[:300]) as span:
             for step in range(1, self.max_steps + 1):
-                resp = self.llm.chat(messages, tools=tool_schemas or None, agent=self.name)
+                # The model sees a compacted view; `messages` itself keeps the full history.
+                view = self.context_policy(messages) if self.context_policy else messages
+                if view is not messages:
+                    span.set(**{f"context_step{step}": f"{size_chars(messages)} -> {size_chars(view)} chars"})
+                resp = self.llm.chat(view, tools=tool_schemas or None, agent=self.name)
                 cost += resp.cost_usd or 0.0
                 messages.append(resp.raw_message)  # the model's own turn, incl. its tool calls
 
@@ -151,7 +158,9 @@ class AgentLoop:
                     result = ToolResult(f"ERROR: {type(exc).__name__}: {exc}", True)
 
             if len(result.content) > MAX_TOOL_OUTPUT_CHARS:
-                result.content = result.content[:MAX_TOOL_OUTPUT_CHARS] + "\n...[truncated]"
+                hidden = len(result.content) - MAX_TOOL_OUTPUT_CHARS
+                result.content = (result.content[:MAX_TOOL_OUTPUT_CHARS]
+                                  + f"\n...[truncated: {hidden} more chars not shown]")
             span.set(is_error=result.is_error, output_preview=result.content[:300])
             return result
 

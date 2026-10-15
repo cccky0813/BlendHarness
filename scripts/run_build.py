@@ -42,14 +42,22 @@ Current script (it runs without errors):
 A visual review of renders of this model found these problems:
 {issues}
 
-Fix these problems, keeping everything that is already good: run the complete revised script with
-execute_bpy, check it with inspect_scene, and only then reply with a short summary."""
+Fix these problems, keeping everything that is already good. The script above is already loaded as
+the current working script: make each fix with edit_script (exact old_string -> new_string, one call per
+separate change) instead of resending the whole script. Then check with inspect_scene, and only then reply
+with a short summary."""
+
+REFINE_TEMPLATE_NO_EDIT = REFINE_TEMPLATE.replace(
+    "The script above is already loaded as\nthe current working script: make each fix with edit_script (exact old_string -> new_string, one call per\nseparate change) instead of resending the whole script.",
+    "Run the complete revised script with execute_bpy.")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("prompt", nargs="?", default=DEFAULT_PROMPT)
 parser.add_argument("--model", default="deepseek-flash")
 parser.add_argument("--critic-model", default="claude-haiku-4-5")
 parser.add_argument("--rounds", type=int, default=2, help="max critic-driven revisions")
+parser.add_argument("--no-edit", action="store_true", help="ablation: no edit_script/view_script tools")
+parser.add_argument("--no-compact", action="store_true", help="ablation: no context compaction")
 parser.add_argument("--effort", default="low", choices=["default", "low", "high", "off"],
                     help="coder thinking effort")
 parser.add_argument("--critic-effort", default="default", choices=["default", "low", "high", "off"],
@@ -71,7 +79,8 @@ def effort_body(model: str, effort: str) -> dict | None:
         return {"thinking": {"type": "disabled"}}
     return None
 
-run_id = time.strftime("%Y%m%d_%H%M%S") + f"_build_{args.model}"
+variant = ("noedit_" if args.no_edit else "") + ("nocompact_" if args.no_compact else "")
+run_id = time.strftime("%Y%m%d_%H%M%S") + f"_build_{variant}{args.model}"
 run_dir = Path("runs") / run_id
 tracer = Tracer(run_dir, run_id=run_id)
 t0 = time.perf_counter()
@@ -79,7 +88,8 @@ rounds_log = []
 
 with BlenderSession(run_dir / "blender.log") as session:
     blender = BlenderTools(session, run_dir / "renders")
-    coder = make_coder(LLMClient(args.model, tracer, extra_body=effort_body(args.model, args.effort)), blender)
+    coder = make_coder(LLMClient(args.model, tracer, extra_body=effort_body(args.model, args.effort)), blender,
+                       compact_context=not args.no_compact, edit_tools=not args.no_edit)
     critic_llm = LLMClient(args.critic_model, tracer, extra_body=effort_body(args.critic_model, args.critic_effort))
     verifier_llm = critic_llm  # same model by default; still a separate role with its own prompt
 
@@ -105,7 +115,7 @@ with BlenderSession(run_dir / "blender.log") as session:
                 if approved:
                     break
                 before_snapshot, before_renders = blender.snapshot(), renders
-                result = coder.run(REFINE_TEMPLATE.format(request=args.prompt, script=blender.current_script,
+                result = coder.run((REFINE_TEMPLATE_NO_EDIT if args.no_edit else REFINE_TEMPLATE).format(request=args.prompt, script=blender.current_script,
                                                           issues=feedback))
                 renders = blender.render(f"round{rnd}", num_views=3)
                 diff = diff_snapshots(before_snapshot, blender.snapshot())
@@ -135,6 +145,7 @@ with BlenderSession(run_dir / "blender.log") as session:
     (run_dir / "final_script.py").write_text(blender.current_script, encoding="utf-8")
     total = tracer.summary()
     record = {"prompt": args.prompt, "models": {"coder": args.model, "critic": args.critic_model, "verifier": args.critic_model},
+              "m3": {"edit_tools": not args.no_edit, "compact_context": not args.no_compact},
               "rounds": rounds_log, "approved": approved,
               "wall_time_s": round(time.perf_counter() - t0, 1), "executions": len(blender.history),
               "failed_executions": sum(not h["ok"] for h in blender.history),

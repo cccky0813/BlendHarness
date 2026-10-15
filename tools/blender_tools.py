@@ -15,6 +15,7 @@ from typing import Optional
 from harness.loop import Tool, ToolResult
 from tools.blender_session import BlenderSession
 
+VIEW_PAGE_LINES = 120
 _RENDER_PREFIX = "BA_RENDER_RESULT="
 _SCENE_PREFIX = "BA_SCENE_RESULT="
 
@@ -36,10 +37,57 @@ class BlenderTools:
             if r.output.strip():
                 msg += f"\n--- stdout before the error ---\n{r.output.strip()[-1500:]}"
             return ToolResult(msg, is_error=True)
+        previous = self.current_script
         self.current_script = code
-        summary = self._scene_summary_line()
+        snap = self.snapshot()
+        if previous and "error" not in snap and snap["summary"]["mesh_object_count"] == 0:
+            # A probe/test snippet must not wipe the model: keep the last working script.
+            self.current_script = previous
+            self.history[-1]["ok"] = False
+            return ToolResult(
+                "ERROR: the script ran but produced an EMPTY scene, so it was NOT saved; the previous working "
+                "script is still current. execute_bpy always rebuilds the whole scene from your script. "
+                "To read values use inspect_scene or view_script; to change the model use edit_script or send "
+                "the complete script." + (f"\n--- stdout ---\n{r.output.strip()[-800:]}" if r.output.strip() else ""),
+                is_error=True)
+        summary = self._scene_summary_line(snap)
         out = r.output.strip()
         return ToolResult(f"OK: script ran in {r.duration_s}s. {summary}" + (f"\n--- stdout ---\n{out[-1500:]}" if out else ""))
+
+    def edit_script(self, old_string: str, new_string: str) -> ToolResult:
+        """Replace one exact snippet of current_script, then run the edited script.
+
+        Transactional: the edit is kept only if the edited script runs; otherwise current_script
+        stays as it was, so the model always edits a known-good version.
+        """
+        if not self.current_script:
+            return ToolResult("ERROR: there is no script yet; create one with execute_bpy first.", True)
+        count = self.current_script.count(old_string)
+        if count == 0:
+            return ToolResult("ERROR: old_string not found in the current script. It must match exactly, "
+                              "including indentation. Use view_script to see the current version.", True)
+        if count > 1:
+            return ToolResult(f"ERROR: old_string occurs {count} times; include more surrounding lines "
+                              "so it is unique.", True)
+        edited = self.current_script.replace(old_string, new_string, 1)
+        before = self.current_script
+        result = self.execute_bpy(edited)          # sets current_script only on success
+        if result.is_error:
+            self.current_script = before           # (already unchanged; explicit for clarity)
+            return ToolResult("ERROR: the edited script failed, edit NOT applied (current script unchanged).\n"
+                              + result.content.removeprefix("ERROR: "), True)
+        return ToolResult(result.content.replace("OK: script ran", "OK: edit applied, script ran", 1))
+
+    def view_script(self, start_line: int = 1, end_line: int | None = None) -> ToolResult:
+        """Show part of current_script with line numbers (paged, so long scripts are fully readable)."""
+        if not self.current_script:
+            return ToolResult("ERROR: there is no script yet.", True)
+        lines = self.current_script.splitlines()
+        start = max(1, int(start_line))
+        end = min(len(lines), int(end_line) if end_line else start + VIEW_PAGE_LINES - 1)
+        body = "\n".join(f"{i:4d}| {lines[i - 1]}" for i in range(start, end + 1))
+        more = f"\n... ({len(lines) - end} more lines: call view_script with start_line={end + 1})" if end < len(lines) else ""
+        return ToolResult(f"lines {start}-{end} of {len(lines)}\n{body}{more}")
 
     def inspect_scene(self) -> ToolResult:
         snap = self.snapshot()
@@ -78,8 +126,8 @@ class BlenderTools:
         payload = _extract_prefixed_json(r.output, _RENDER_PREFIX) or {}
         return payload.get("renders", [])
 
-    def as_tools(self) -> list[Tool]:
-        return [
+    def as_tools(self, include_edit: bool = True) -> list[Tool]:
+        tools = [
             Tool(
                 name="execute_bpy",
                 description=(
@@ -93,6 +141,30 @@ class BlenderTools:
                 fn=self.execute_bpy,
             ),
             Tool(
+                name="edit_script",
+                description=(
+                    "Change part of the current working script without resending all of it: replaces the "
+                    "exact text old_string (must occur exactly once) with new_string, then runs the full "
+                    "edited script in a fresh scene. Kept only if it runs without error. Prefer this over "
+                    "execute_bpy for targeted fixes; call it several times for several separate changes."
+                ),
+                parameters={"type": "object",
+                            "properties": {"old_string": {"type": "string", "description": "Exact text to replace."},
+                                           "new_string": {"type": "string", "description": "Replacement text."}},
+                            "required": ["old_string", "new_string"]},
+                fn=self.edit_script,
+            ),
+            Tool(
+                name="view_script",
+                description=("Show the current working script (last version that ran OK) with line numbers, "
+                             f"{VIEW_PAGE_LINES} lines per call; use start_line/end_line to page through it."),
+                parameters={"type": "object",
+                            "properties": {"start_line": {"type": "integer", "description": "First line (1-based)."},
+                                           "end_line": {"type": "integer", "description": "Last line (inclusive)."}},
+                            "required": []},
+                fn=self.view_script,
+            ),
+            Tool(
                 name="inspect_scene",
                 description=(
                     "List every object produced by the last successful script: name, type, location, "
@@ -103,9 +175,11 @@ class BlenderTools:
                 fn=self.inspect_scene,
             ),
         ]
+        if not include_edit:  # ablation: full-script rewrites only (M3 baseline behaviour)
+            tools = [t for t in tools if t.name not in ("edit_script", "view_script")]
+        return tools
 
-    def _scene_summary_line(self) -> str:
-        snap = self.snapshot()
+    def _scene_summary_line(self, snap: dict) -> str:
         if "error" in snap:
             return ""
         s = snap["summary"]
