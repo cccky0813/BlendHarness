@@ -71,7 +71,8 @@ def make_coder_context(blender: BlenderTools):
         if not blender.current_script:
             return view
         view = omit_stale_code_blocks(view, lambda msgs, i: True)
-        return pin_at_end(view, "CURRENT WORKING SCRIPT (always up to date; this is the text edit_script edits):\n"
+        return pin_at_end(view, "CURRENT WORKING SCRIPT (always up to date; this is the text edit_script edits; "
+                                "loaded skills are prepended automatically when it runs):\n"
                                 f"```python\n{blender.current_script}\n```")
     return policy
 
@@ -79,12 +80,18 @@ def make_coder_context(blender: BlenderTools):
 def make_coder(llm: LLMClient, blender: BlenderTools, max_steps: int = 15,
                max_cost_usd: float | None = 0.5, compact_context: bool = True,
                edit_tools: bool = True) -> AgentLoop:
+    prompt = CODER_PROMPT
+    index = blender.skills.index_text() if blender.skills else ""
+    if index:  # progressive disclosure: only names + one-line descriptions sit in the context
+        prompt += ("\nSkill library (verified reusable functions). If one fits a part of the request, call "
+                   "load_skill(name) and then use the function in your script instead of writing it again:\n"
+                   + index + "\n")
     return AgentLoop(
         context_policy=make_coder_context(blender) if compact_context else None,
         completion_check=executed_successfully,
         name="coder",
         llm=llm,
-        system_prompt=CODER_PROMPT,
+        system_prompt=prompt,
         tools=blender.as_tools(include_edit=edit_tools),
         max_steps=max_steps,
         max_same_error=3,

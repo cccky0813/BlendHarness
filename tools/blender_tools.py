@@ -8,12 +8,16 @@ The render script and Scene-Inspector are ported from the original LL3M_demo1 pr
 """
 
 import json
+import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from harness.loop import Tool, ToolResult
 from tools.blender_session import BlenderSession
+
+if TYPE_CHECKING:
+    from memory.skill_library import SkillLibrary
 
 VIEW_PAGE_LINES = 120
 _RENDER_PREFIX = "BA_RENDER_RESULT="
@@ -21,7 +25,10 @@ _SCENE_PREFIX = "BA_SCENE_RESULT="
 
 
 class BlenderTools:
-    def __init__(self, session: BlenderSession, renders_dir: str | Path, resolution: int = 512) -> None:
+    def __init__(self, session: BlenderSession, renders_dir: str | Path, resolution: int = 512,
+                 skills: Optional["SkillLibrary"] = None) -> None:
+        self.skills = skills
+        self.loaded_skills: list[str] = []   # skills whose code is prepended to every script run
         self.session = session
         self.renders_dir = Path(renders_dir).resolve()
         self.resolution = resolution
@@ -30,7 +37,9 @@ class BlenderTools:
 
     # ---------- tool functions (what the agent calls) ----------
     def execute_bpy(self, code: str) -> ToolResult:
-        r = self.session.execute(code, reset=True)
+        r = self.session.execute(self._with_skills(code), reset=True)
+        r.traceback = self._map_lines(r.traceback)
+        r.error = self._map_lines(r.error)
         self.history.append({"code": code, "ok": r.ok, "error": r.error})
         if not r.ok:
             msg = f"ERROR: {r.error}\n{r.traceback}".strip()
@@ -113,7 +122,7 @@ class BlenderTools:
         """Structured scene state (Scene-Inspector) of current_script."""
         if not self.current_script:
             return {"error": "no successful script yet; call execute_bpy first"}
-        r = self.session.execute(self.current_script + "\n" + _SCENE_INSPECTOR_SCRIPT, reset=True)
+        r = self.session.execute(self.full_script() + "\n" + _SCENE_INSPECTOR_SCRIPT, reset=True)
         if not r.ok:
             return {"error": r.error}
         return _extract_prefixed_json(r.output, _SCENE_PREFIX) or {"error": "Scene-Inspector returned nothing"}
@@ -125,11 +134,48 @@ class BlenderTools:
         out_dir = self.renders_dir / f"{tag}_{time.strftime('%H%M%S')}"
         script = _RENDER_SCRIPT.format(out_dir=str(out_dir), tag=tag, num_views=num_views,
                                        top_view=top_view, res=self.resolution, prefix=_RENDER_PREFIX)
-        r = self.session.execute(self.current_script + "\n" + script, reset=True, timeout_s=300)
+        r = self.session.execute(self.full_script() + "\n" + script, reset=True, timeout_s=300)
         if not r.ok:
             return []
         payload = _extract_prefixed_json(r.output, _RENDER_PREFIX) or {}
         return payload.get("renders", [])
+
+    # ---------- skills (M4) ----------
+    def preamble(self) -> str:
+        """Code of all loaded skills; prepended to every script so the model only CALLS them."""
+        if not self.skills or not self.loaded_skills:
+            return ""
+        parts = [f"# ---- skill: {n} ----\n" + self.skills.get(n).code.strip() for n in self.loaded_skills]
+        return "\n\n".join(parts) + "\n# ---- end of skills ----\n"
+
+    def _with_skills(self, code: str) -> str:
+        return self.preamble() + code
+
+    def full_script(self) -> str:
+        """Standalone script: loaded skills + current_script (what final_script.py should contain)."""
+        return self._with_skills(self.current_script)
+
+    def _map_lines(self, text: str) -> str:
+        """Tracebacks count lines of preamble + script; translate them back to the model's own script."""
+        offset = self.preamble().count("\n")
+        if not offset or not text:
+            return text
+
+        def fix(m: re.Match) -> str:
+            n = int(m.group(1))
+            return f'File "<your script>", line {n - offset}' if n > offset else f'File "<skill code>", line {n}'
+        return re.sub(r'File "<agent_code>", line (\d+)', fix, text)
+
+    def load_skill(self, name: str) -> ToolResult:
+        skill = self.skills.get(name) if self.skills else None
+        if skill is None:
+            available = ", ".join(self.skills.names()) if self.skills else "none"
+            return ToolResult(f"ERROR: no skill named {name!r}. Available: {available}", True)
+        if name not in self.loaded_skills:
+            self.loaded_skills.append(name)
+        return ToolResult(
+            f"OK: skill '{name}' loaded. {skill.function_name} is now defined at the top of EVERY script you run "
+            f"(execute_bpy / edit_script): call it, do not copy its code.\n\n{skill.signature()}\n\n{skill.notes}")
 
     def as_tools(self, include_edit: bool = True) -> list[Tool]:
         tools = [
@@ -185,6 +231,16 @@ class BlenderTools:
                 fn=self.inspect_scene,
             ),
         ]
+        if self.skills and self.skills.names():
+            tools.append(Tool(
+                name="load_skill",
+                description=("Load a verified reusable modeling function from the skill library (see the list of "
+                             "skills in your instructions). Returns its signature and usage notes; afterwards the "
+                             "function is available in every script you run."),
+                parameters={"type": "object", "properties": {"name": {"type": "string", "description": "Skill name."}},
+                            "required": ["name"]},
+                fn=self.load_skill,
+            ))
         if not include_edit:  # ablation: full-script rewrites only (M3 baseline behaviour)
             tools = [t for t in tools if t.name not in ("edit_script", "view_script")]
         return tools

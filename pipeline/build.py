@@ -18,6 +18,7 @@ from agents.critic import critique
 from agents.verifier import verify
 from harness.llm import LLMClient
 from harness.tracing import Tracer
+from memory.skill_library import SkillLibrary
 from tools.blender_session import BlenderSession
 from tools.blender_tools import BlenderTools, diff_snapshots
 
@@ -75,6 +76,7 @@ class BuildConfig:
     edit_tools: bool = True                    # M3: edit_script / view_script
     compact_context: bool = True               # M3: history compaction
     coder_max_cost_usd: float = 0.5            # per coder run
+    skills_dir: str | None = None              # M4: skill library folder (None = no skills)
 
 
 def effort_body(model: str, effort: str) -> dict | None:
@@ -102,7 +104,8 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
     open_issues: list[dict] = []
 
     with BlenderSession(run_dir / "blender.log") as session:
-        blender = BlenderTools(session, run_dir / "renders")
+        skills = SkillLibrary(cfg.skills_dir) if cfg.skills_dir else None
+        blender = BlenderTools(session, run_dir / "renders", skills=skills)
         coder = make_coder(LLMClient(cfg.coder_model, tracer, extra_body=effort_body(cfg.coder_model, cfg.coder_effort)),
                            blender, max_cost_usd=cfg.coder_max_cost_usd,
                            compact_context=cfg.compact_context, edit_tools=cfg.edit_tools)
@@ -154,7 +157,9 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                 rounds_log.append({"round": 0, "coder_status": result.status, "note": "no working script"})
                 log(f"--- round 0: coder={result.status}, no working script ({result.reason})")
 
-        (run_dir / "final_script.py").write_text(blender.current_script, encoding="utf-8")
+        (run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
+        for name in blender.loaded_skills:  # quality signal for the library: was the task approved?
+            skills.record_use(name, success=approved)
         total = tracer.summary()
         record = {
             "prompt": prompt, "config": asdict(cfg), "approved": approved,
@@ -166,6 +171,8 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
             "exec_errors": [h["error"].strip().splitlines()[0][:200] for h in blender.history
                             if not h["ok"] and h.get("error")],
             "sandbox_restarts": session.restarts,
+            "skills_available": skills.names() if skills else [],
+            "skills_loaded": list(blender.loaded_skills),
             "llm_total": total["total"], "llm_per_agent": total["per_agent"],
         }
         (run_dir / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
