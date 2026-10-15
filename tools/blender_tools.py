@@ -11,13 +11,10 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Callable, Optional
 
 from harness.loop import Tool, ToolResult
 from tools.blender_session import BlenderSession
-
-if TYPE_CHECKING:
-    from memory.skill_library import SkillLibrary
 
 VIEW_PAGE_LINES = 120
 _RENDER_PREFIX = "BA_RENDER_RESULT="
@@ -26,9 +23,10 @@ _SCENE_PREFIX = "BA_SCENE_RESULT="
 
 class BlenderTools:
     def __init__(self, session: BlenderSession, renders_dir: str | Path, resolution: int = 512,
-                 skills: Optional["SkillLibrary"] = None) -> None:
-        self.skills = skills
-        self.loaded_skills: list[str] = []   # skills whose code is prepended to every script run
+                 preamble_provider: Optional[Callable[[], str]] = None) -> None:
+        # Generic hook: code to prepend to every script run (e.g. loaded skills). This class does not
+        # know what the code is; tools/skill_tools.py provides it (dependency inversion).
+        self.preamble_provider = preamble_provider
         self.session = session
         self.renders_dir = Path(renders_dir).resolve()
         self.resolution = resolution
@@ -140,19 +138,15 @@ class BlenderTools:
         payload = _extract_prefixed_json(r.output, _RENDER_PREFIX) or {}
         return payload.get("renders", [])
 
-    # ---------- skills (M4) ----------
+    # ---------- preamble hook ----------
     def preamble(self) -> str:
-        """Code of all loaded skills; prepended to every script so the model only CALLS them."""
-        if not self.skills or not self.loaded_skills:
-            return ""
-        parts = [f"# ---- skill: {n} ----\n" + self.skills.get(n).code.strip() for n in self.loaded_skills]
-        return "\n\n".join(parts) + "\n# ---- end of skills ----\n"
+        return self.preamble_provider() if self.preamble_provider else ""
 
     def _with_skills(self, code: str) -> str:
         return self.preamble() + code
 
     def full_script(self) -> str:
-        """Standalone script: loaded skills + current_script (what final_script.py should contain)."""
+        """Standalone script: preamble (e.g. loaded skills) + current_script (what final_script.py contains)."""
         return self._with_skills(self.current_script)
 
     def _map_lines(self, text: str) -> str:
@@ -165,17 +159,6 @@ class BlenderTools:
             n = int(m.group(1))
             return f'File "<your script>", line {n - offset}' if n > offset else f'File "<skill code>", line {n}'
         return re.sub(r'File "<agent_code>", line (\d+)', fix, text)
-
-    def load_skill(self, name: str) -> ToolResult:
-        skill = self.skills.get(name) if self.skills else None
-        if skill is None:
-            available = ", ".join(self.skills.names()) if self.skills else "none"
-            return ToolResult(f"ERROR: no skill named {name!r}. Available: {available}", True)
-        if name not in self.loaded_skills:
-            self.loaded_skills.append(name)
-        return ToolResult(
-            f"OK: skill '{name}' loaded. {skill.function_name} is now defined at the top of EVERY script you run "
-            f"(execute_bpy / edit_script): call it, do not copy its code.\n\n{skill.signature()}\n\n{skill.notes}")
 
     def as_tools(self, include_edit: bool = True) -> list[Tool]:
         tools = [
@@ -231,16 +214,6 @@ class BlenderTools:
                 fn=self.inspect_scene,
             ),
         ]
-        if self.skills and self.skills.names():
-            tools.append(Tool(
-                name="load_skill",
-                description=("Load a verified reusable modeling function from the skill library (see the list of "
-                             "skills in your instructions). Returns its signature and usage notes; afterwards the "
-                             "function is available in every script you run."),
-                parameters={"type": "object", "properties": {"name": {"type": "string", "description": "Skill name."}},
-                            "required": ["name"]},
-                fn=self.load_skill,
-            ))
         if not include_edit:  # ablation: full-script rewrites only (M3 baseline behaviour)
             tools = [t for t in tools if t.name not in ("edit_script", "view_script")]
         return tools

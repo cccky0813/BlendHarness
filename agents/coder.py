@@ -4,6 +4,7 @@ from harness.context import omit_large_tool_args, omit_stale_code_blocks, pin_at
 from harness.llm import LLMClient
 from harness.loop import AgentLoop
 from tools.blender_tools import BlenderTools
+from tools.skill_tools import SkillTools
 
 CODER_PROMPT = """You are an expert Blender 4.4.3 Python (bpy) modeler running in a headless Blender.
 
@@ -77,11 +78,11 @@ def make_coder_context(blender: BlenderTools):
     return policy
 
 
-def make_coder(llm: LLMClient, blender: BlenderTools, max_steps: int = 15,
+def make_coder(llm: LLMClient, blender: BlenderTools, skill_tools: SkillTools | None = None, max_steps: int = 15,
                max_cost_usd: float | None = 0.5, compact_context: bool = True,
                edit_tools: bool = True) -> AgentLoop:
     prompt = CODER_PROMPT
-    index = blender.skills.index_text() if blender.skills else ""
+    index = skill_tools.index_text() if skill_tools else ""
     if index:  # progressive disclosure: only names + one-line descriptions sit in the context
         prompt += ("\nSkill library (verified reusable functions). If one fits a part of the request, call "
                    "load_skill(name) and then use the function in your script instead of writing it again:\n"
@@ -92,7 +93,7 @@ def make_coder(llm: LLMClient, blender: BlenderTools, max_steps: int = 15,
         name="coder",
         llm=llm,
         system_prompt=prompt,
-        tools=blender.as_tools(include_edit=edit_tools),
+        tools=blender.as_tools(include_edit=edit_tools) + (skill_tools.as_tools() if skill_tools else []),
         max_steps=max_steps,
         max_same_error=3,
         max_cost_usd=max_cost_usd,

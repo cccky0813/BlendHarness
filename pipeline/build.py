@@ -23,6 +23,7 @@ from memory.skill_admission import admit
 from memory.skill_library import SkillLibrary
 from tools.blender_session import BlenderSession
 from tools.blender_tools import BlenderTools, diff_snapshots
+from tools.skill_tools import SkillTools
 
 REFINE_TEMPLATE_NO_EDIT = """Revise an existing Blender model.
 
@@ -109,9 +110,11 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
 
     with BlenderSession(run_dir / "blender.log") as session:
         skills = SkillLibrary(cfg.skills_dir) if cfg.skills_dir else None
-        blender = BlenderTools(session, run_dir / "renders", skills=skills)
+        skill_tools = SkillTools(skills) if skills is not None else None
+        blender = BlenderTools(session, run_dir / "renders",
+                               preamble_provider=skill_tools.preamble if skill_tools else None)
         coder = make_coder(LLMClient(cfg.coder_model, tracer, extra_body=effort_body(cfg.coder_model, cfg.coder_effort)),
-                           blender, max_cost_usd=cfg.coder_max_cost_usd,
+                           blender, skill_tools=skill_tools, max_cost_usd=cfg.coder_max_cost_usd,
                            compact_context=cfg.compact_context, edit_tools=cfg.edit_tools)
         critic_llm = LLMClient(cfg.critic_model, tracer, extra_body=effort_body(cfg.critic_model, cfg.critic_effort))
         verifier_llm = critic_llm  # same model by default; still a separate role with its own prompt
@@ -175,7 +178,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                 f"rejected {[r['name'] + ' (' + r['gate'] + ')' for r in admission.rejected]}")
 
         (run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
-        for name in blender.loaded_skills:  # quality signal for the library: was the task approved?
+        for name in (skill_tools.loaded if skill_tools else []):  # quality signal: was the task approved?
             skills.record_use(name, success=approved)
         total = tracer.summary()
         record = {
@@ -189,7 +192,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                             if not h["ok"] and h.get("error")],
             "sandbox_restarts": session.restarts,
             "skills_available": skills.names() if skills else [],
-            "skills_loaded": list(blender.loaded_skills),
+            "skills_loaded": list(skill_tools.loaded) if skill_tools else [],
             "skills_learned": learned,
             "llm_total": total["total"], "llm_per_agent": total["per_agent"],
         }
