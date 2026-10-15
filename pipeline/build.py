@@ -15,9 +15,11 @@ from typing import Callable
 
 from agents.coder import make_coder
 from agents.critic import critique
+from agents.librarian import propose_skills
 from agents.verifier import verify
 from harness.llm import LLMClient
 from harness.tracing import Tracer
+from memory.skill_admission import admit
 from memory.skill_library import SkillLibrary
 from tools.blender_session import BlenderSession
 from tools.blender_tools import BlenderTools, diff_snapshots
@@ -77,6 +79,8 @@ class BuildConfig:
     compact_context: bool = True               # M3: history compaction
     coder_max_cost_usd: float = 0.5            # per coder run
     skills_dir: str | None = None              # M4: skill library folder (None = no skills)
+    learn_skills: bool = False                 # M4: after an approved build, extract + admit new skills
+    librarian_model: str | None = None         # default: coder_model
 
 
 def effort_body(model: str, effort: str) -> dict | None:
@@ -157,6 +161,19 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                 rounds_log.append({"round": 0, "coder_status": result.status, "note": "no working script"})
                 log(f"--- round 0: coder={result.status}, no working script ({result.reason})")
 
+        learned = {"added": [], "rejected": [], "proposed": 0}
+        if approved and skills is not None and cfg.learn_skills:
+            # Self-evolution: turn this approved build into reusable skills (only verified code is admitted).
+            lib_model = cfg.librarian_model or cfg.coder_model
+            proposal = propose_skills(LLMClient(lib_model, tracer, extra_body=effort_body(lib_model, cfg.coder_effort)),
+                                      prompt, blender.full_script(), skills.index_text(), source_task=run_dir.name)
+            admission = admit(proposal.skills, skills, session, critic_llm=critic_llm,
+                              renders_dir=run_dir / "renders" / "skill_checks")
+            learned = {"added": admission.admitted, "rejected": admission.rejected,
+                       "proposed": len(proposal.skills), "parse_error": proposal.parse_error}
+            log(f"--- librarian: proposed {len(proposal.skills)}, added {admission.admitted}, "
+                f"rejected {[r['name'] + ' (' + r['gate'] + ')' for r in admission.rejected]}")
+
         (run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
         for name in blender.loaded_skills:  # quality signal for the library: was the task approved?
             skills.record_use(name, success=approved)
@@ -173,6 +190,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
             "sandbox_restarts": session.restarts,
             "skills_available": skills.names() if skills else [],
             "skills_loaded": list(blender.loaded_skills),
+            "skills_learned": learned,
             "llm_total": total["total"], "llm_per_agent": total["per_agent"],
         }
         (run_dir / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
