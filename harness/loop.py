@@ -40,7 +40,7 @@ class Tool:
 
 @dataclass
 class LoopResult:
-    status: str                  # "done" | "max_steps" | "stuck" | "over_budget"
+    status: str                  # "done" | "max_steps" | "stuck" | "over_budget" | "truncated"
     final_text: str              # the model's last answer (may be empty if it never finished)
     steps: int
     cost_usd: float
@@ -75,12 +75,25 @@ class AgentLoop:
         tool_schemas = [t.schema() for t in self.tools.values()]
         error_counts: dict[str, int] = {}
         cost = 0.0
+        truncations = 0
 
         with self.llm.tracer.span("agent", self.name, task=task[:300]) as span:
             for step in range(1, self.max_steps + 1):
                 resp = self.llm.chat(messages, tools=tool_schemas or None, agent=self.name)
                 cost += resp.cost_usd or 0.0
                 messages.append(resp.raw_message)  # the model's own turn, incl. its tool calls
+
+                if not resp.tool_calls and resp.finish_reason == "length":
+                    # Cut off by max_tokens (often by over-long thinking): NOT a final answer.
+                    truncations += 1
+                    if truncations >= 2:
+                        return self._finish(span, "truncated", resp.text, step, cost, messages,
+                                            reason="output hit max_tokens twice in a row")
+                    messages.append({"role": "user", "content":
+                                     "Your last response was cut off by the output length limit before you "
+                                     "acted. Stop deliberating and act now: call the appropriate tool."})
+                    continue
+                truncations = 0
 
                 if not resp.tool_calls:  # no tool requested: the model considers the task finished
                     return self._finish(span, "done", resp.text, step, cost, messages)

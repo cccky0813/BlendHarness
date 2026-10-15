@@ -60,6 +60,7 @@ class LLMResponse:
     finish_reason: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0     # part of output_tokens spent on hidden "thinking"
     cached_tokens: int = 0
     cost_usd: Optional[float] = None
     raw_message: dict[str, Any] = field(default_factory=dict)  # to append back into messages
@@ -84,15 +85,17 @@ class LLMClient:
         model: str,
         tracer: Tracer,
         temperature: float = 0.2,
-        max_tokens: int = 8000,
+        max_tokens: int = 32000,
         max_retries: int = 3,
-        timeout_s: float = 180,
+        timeout_s: float = 300,
+        extra_body: Optional[dict[str, Any]] = None,  # provider-specific, e.g. {"reasoning_effort": "low"}
     ) -> None:
         self.model = model
         self.tracer = tracer
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.max_retries = max_retries
+        self.extra_body = extra_body or {}
         base_url, api_key = provider_env(model)
         # max_retries=0: we retry ourselves so every attempt is visible in the trace.
         self.client = OpenAI(
@@ -109,13 +112,15 @@ class LLMClient:
         tools: Optional[list[dict[str, Any]]] = None,
         agent: str = "unknown",
     ) -> LLMResponse:
-        with self.tracer.span("llm", self.model, agent=agent, n_messages=len(messages)) as span:
+        with self.tracer.span("llm", self.model, agent=agent, n_messages=len(messages),
+                              extra_body=self.extra_body or None) as span:
             completion = self._create_with_retry(messages, tools, span)
             resp = self._parse(completion)
             span.set(
                 request_id=getattr(completion, "id", None),  # provider's id: quote it in support tickets
                 input_tokens=resp.input_tokens,
                 output_tokens=resp.output_tokens,
+                reasoning_tokens=resp.reasoning_tokens,
                 cached_tokens=resp.cached_tokens,
                 cost_usd=resp.cost_usd,
                 finish_reason=resp.finish_reason,
@@ -134,6 +139,8 @@ class LLMClient:
         )
         if tools:
             kwargs["tools"] = tools
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
         for attempt in range(1, self.max_retries + 1):
             try:
                 completion = self.client.chat.completions.create(**kwargs)
@@ -166,6 +173,8 @@ class LLMClient:
         output_tokens = getattr(usage, "completion_tokens", 0) or 0
         details = getattr(usage, "prompt_tokens_details", None)
         cached_tokens = (getattr(details, "cached_tokens", 0) or 0) if details else 0
+        out_details = getattr(usage, "completion_tokens_details", None)
+        reasoning_tokens = (getattr(out_details, "reasoning_tokens", 0) or 0) if out_details else 0
 
         return LLMResponse(
             text=msg.content or "",
@@ -173,6 +182,7 @@ class LLMClient:
             finish_reason=choice.finish_reason or "",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
             cached_tokens=cached_tokens,
             cost_usd=self._cost(input_tokens, output_tokens, cached_tokens),
             raw_message=msg.model_dump(exclude_none=True),
