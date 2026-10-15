@@ -15,11 +15,10 @@ from typing import Callable
 
 from agents.coder import make_coder
 from agents.critic import critique
-from agents.librarian import propose_skills
 from agents.verifier import verify
 from harness.llm import LLMClient
 from harness.tracing import Tracer
-from memory.skill_admission import admit
+from memory.learning import learn_from_build
 from memory.skill_library import SkillLibrary
 from tools.blender_session import BlenderSession
 from tools.blender_tools import BlenderTools, diff_snapshots
@@ -169,14 +168,10 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
         if approved and skills is not None and cfg.learn_skills:
             # Self-evolution: turn this approved build into reusable skills (only verified code is admitted).
             lib_model = cfg.librarian_model or cfg.coder_model
-            proposal = propose_skills(LLMClient(lib_model, tracer, extra_body=effort_body(lib_model, cfg.coder_effort)),
-                                      prompt, blender.full_script(), skills.index_text(), source_task=run_dir.name)
-            admission = admit(proposal.skills, skills, session, critic_llm=critic_llm,
-                              renders_dir=run_dir / "renders" / "skill_checks")
-            learned = {"added": admission.admitted, "rejected": admission.rejected,
-                       "proposed": len(proposal.skills), "parse_error": proposal.parse_error}
-            log(f"--- librarian: proposed {len(proposal.skills)}, added {admission.admitted}, "
-                f"rejected {[r['name'] + ' (' + r['gate'] + ')' for r in admission.rejected]}")
+            learned = learn_from_build(
+                LLMClient(lib_model, tracer, extra_body=effort_body(lib_model, cfg.coder_effort)), critic_llm,
+                prompt, blender.full_script(), skills, session, source_task=run_dir.name,
+                renders_dir=run_dir / "renders" / "skill_checks", log=log)
 
         (run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
         for name in (skill_tools.loaded if skill_tools and cfg.track_skill_usage else []):  # quality signal

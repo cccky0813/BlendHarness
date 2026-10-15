@@ -74,8 +74,9 @@ def structure_check(snapshot: dict) -> str | None:
     lo = [min(o["bbox"]["min"][i] for o in meshes) for i in range(3)]
     hi = [max(o["bbox"]["max"][i] for o in meshes) for i in range(3)]
     size = max(hi[i] - lo[i] for i in range(3)) or 1.0
-    if lo[2] < -GROUND_TOLERANCE * size:
-        sunk = sorted((o for o in meshes if o["bbox"]["min"][2] < -GROUND_TOLERANCE * size), key=lambda o: o["bbox"]["min"][2])
+    tol = max(GROUND_TOLERANCE * size, 0.01)  # relative, but at least 1 cm (small parts like handles)
+    if lo[2] < -tol:
+        sunk = sorted((o for o in meshes if o["bbox"]["min"][2] < -tol), key=lambda o: o["bbox"]["min"][2])
         return (f"not grounded: lowest point z={lo[2]:.3f} (should be ~0); below ground: "
                 + ", ".join(f"{o['name']} (min z {o['bbox']['min'][2]:.3f})" for o in sunk[:4]))
     gap = CONTACT_TOLERANCE * size
@@ -113,6 +114,11 @@ def quality_check(session: BlenderSession, skill: Skill, critic_llm: Optional[LL
 class AdmissionResult:
     admitted: list[str] = field(default_factory=list)
     rejected: list[dict] = field(default_factory=list)   # {"name", "gate", "reason"}
+    rejected_skills: list[tuple[Skill, str, str]] = field(default_factory=list)  # (skill, gate, reason) for repair
+
+    def reject(self, skill: Skill, gate: str, reason: str) -> None:
+        self.rejected.append({"name": skill.name, "gate": gate, "reason": reason})
+        self.rejected_skills.append((skill, gate, reason))
 
 
 def admit(candidates: list[Skill], library: SkillLibrary, session: BlenderSession,
@@ -121,25 +127,24 @@ def admit(candidates: list[Skill], library: SkillLibrary, session: BlenderSessio
     for skill in candidates:
         error = validate_skill_code(skill.name, skill.code)
         if error:
-            result.rejected.append({"name": skill.name, "gate": "static", "reason": error})
+            result.reject(skill, "static", error)
             continue
         existing = library.all()
         if skill.name in {s.name for s in existing}:
-            result.rejected.append({"name": skill.name, "gate": "dedup", "reason": "name already exists"})
+            result.reject(skill, "dedup", "name already exists")
             continue
         twin = max(existing, key=lambda s: similarity(skill, s), default=None)
         if twin and similarity(skill, twin) >= DUPLICATE_THRESHOLD:
-            result.rejected.append({"name": skill.name, "gate": "dedup",
-                                    "reason": f"too similar to {twin.name} ({similarity(skill, twin):.2f})"})
+            result.reject(skill, "dedup", f"too similar to {twin.name} ({similarity(skill, twin):.2f})")
             continue
         error = sandbox_check(session, skill)
         if error:
-            result.rejected.append({"name": skill.name, "gate": "sandbox", "reason": error[:300]})
+            result.reject(skill, "sandbox", error[:300])
             continue
         error = quality_check(session, skill, critic_llm, renders_dir)
         if error:
             gate = "visual" if error.startswith("visual") else "structure"
-            result.rejected.append({"name": skill.name, "gate": gate, "reason": error[:400]})
+            result.reject(skill, gate, error[:400])
             continue
         library.add(skill)
         result.admitted.append(skill.name)

@@ -38,8 +38,13 @@ def provider_env(model: str) -> tuple[str, str]:
             return os.environ[f"{env_prefix}_BASE_URL"], os.environ[f"{env_prefix}_API_KEY"]
     raise ValueError(f"No provider configured for model {model!r}")
 
+class IncompleteStreamError(Exception):
+    """The stream ended without a finish_reason: the connection was cut mid-answer, silently."""
+
+
 # Errors worth retrying: the request itself was fine, the network/server was not.
 RETRYABLE = (
+    IncompleteStreamError,
     openai.APIConnectionError,
     openai.APITimeoutError,
     openai.RateLimitError,
@@ -264,6 +269,9 @@ class LLMClient:
                 raw.finish_reason = choice.finish_reason
         raw.text, raw.reasoning = "".join(text), "".join(reasoning)
         raw.tool_calls = [calls[i] for i in sorted(calls)]
+        if not raw.finish_reason:
+            # Seen in the wild: 2 tokens ('{"skills') then the stream just ended, no error raised.
+            raise IncompleteStreamError(f"stream ended after {len(raw.text)} chars without finish_reason")
         return raw
 
     def _parse(self, completion: "_Raw") -> LLMResponse:
