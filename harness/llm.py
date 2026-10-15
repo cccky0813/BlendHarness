@@ -158,7 +158,7 @@ class LLMClient:
         tracer: Tracer,
         temperature: float = 0.2,
         max_tokens: int = 32000,
-        max_retries: int = 3,
+        max_retries: int = 6,  # transient errors only: ~1 min of backoff survives a network blip
         timeout_s: float = 300,
         extra_body: Optional[dict[str, Any]] = None,  # provider-specific, e.g. {"reasoning_effort": "low"}
         stream: bool = True,
@@ -228,7 +228,7 @@ class LLMClient:
                 if attempt == self.max_retries or _is_config_error(exc):
                     span.set(attempts=attempt)
                     raise
-                wait = 2 ** attempt  # exponential backoff: 2s, 4s, 8s...
+                wait = min(2 ** attempt, 32)  # exponential backoff: 2, 4, 8, 16, 32 s (~62 s in total)
                 span.set(**{f"retry_{attempt}": f"{type(exc).__name__}, waited {wait}s"})
                 time.sleep(wait)
             # Any other error (bad request, auth, unknown model) is our bug: fail fast, no retry.
