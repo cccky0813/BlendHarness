@@ -47,11 +47,27 @@ parser.add_argument("prompt", nargs="?", default=DEFAULT_PROMPT)
 parser.add_argument("--model", default="deepseek-flash")
 parser.add_argument("--critic-model", default="claude-haiku-4-5")
 parser.add_argument("--rounds", type=int, default=2, help="max critic-driven revisions")
-parser.add_argument("--effort", default="low", choices=["default", "low", "high", "off"])
+parser.add_argument("--effort", default="low", choices=["default", "low", "high", "off"],
+                    help="coder thinking effort")
+parser.add_argument("--critic-effort", default="default", choices=["default", "low", "high", "off"],
+                    help="critic thinking effort; default = provider default (Haiku: no thinking)")
 args = parser.parse_args()
 
-EXTRA = {"default": None, "low": {"reasoning_effort": "low"}, "high": {"reasoning_effort": "high"},
-         "off": {"thinking": {"type": "disabled"}}}[args.effort]
+
+
+def effort_body(model: str, effort: str) -> dict | None:
+    """Thinking control. `reasoning_effort` works for DeepSeek and for Claude through the relay
+    (measured: Claude default thinking burned 12k-32k tokens before acting; low -> ~1.7k).
+    Disabling thinking entirely is only supported by DeepSeek.
+    Careful: the same flag means different things per model. Sonnet thinks by default, so "low" REDUCES
+    thinking; Haiku does not think by default, so "low" TURNS IT ON (critic went 13 -> 32k tokens).
+    Hence effort is configured per agent, not globally."""
+    if effort in ("low", "high"):
+        return {"reasoning_effort": effort}
+    if effort == "off" and model.startswith("deepseek"):
+        return {"thinking": {"type": "disabled"}}
+    return None
+
 run_id = time.strftime("%Y%m%d_%H%M%S") + f"_build_{args.model}"
 run_dir = Path("runs") / run_id
 tracer = Tracer(run_dir, run_id=run_id)
@@ -60,11 +76,8 @@ rounds_log = []
 
 with BlenderSession(run_dir / "blender.log") as session:
     blender = BlenderTools(session, run_dir / "renders")
-    coder = make_coder(LLMClient(args.model, tracer,
-                                 extra_body=EXTRA if args.model.startswith("deepseek") else None), blender)
-    # reasoning_effort / thinking flags are DeepSeek-specific: only pass them to DeepSeek models
-    critic_llm = LLMClient(args.critic_model, tracer,
-                           extra_body=EXTRA if args.critic_model.startswith("deepseek") else None)
+    coder = make_coder(LLMClient(args.model, tracer, extra_body=effort_body(args.model, args.effort)), blender)
+    critic_llm = LLMClient(args.critic_model, tracer, extra_body=effort_body(args.critic_model, args.critic_effort))
 
     with tracer.span("run", "build", prompt=args.prompt):
         task = args.prompt
