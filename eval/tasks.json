@@ -1,0 +1,32 @@
+[
+  {
+    "id": "mug",
+    "tier": "easy",
+    "prompt": "Create a realistic ceramic coffee mug: cylindrical body with a hollow open top and visible wall thickness, a C-shaped handle attached to the side, glossy white ceramic material, and dark coffee liquid inside."
+  },
+  {
+    "id": "chair",
+    "tier": "easy",
+    "prompt": "Create a wooden dining chair: four legs, a square seat, a backrest with three vertical slats between two back posts, and side stretchers connecting the front and back legs near the floor. Natural wood material."
+  },
+  {
+    "id": "lamp",
+    "tier": "medium",
+    "prompt": "Create a desk lamp: a round weighted base, an adjustable arm made of two straight segments joined by a visible hinge, and a cone-shaped lampshade at the end of the arm with a glowing bulb visible inside. Matte black metal with a warm emissive bulb."
+  },
+  {
+    "id": "desk",
+    "tier": "medium",
+    "prompt": "Create a writing desk: a rectangular top, four legs, and a drawer unit under the right side of the top with three stacked drawers, each drawer front with a small metal handle. Oak wood top and legs, white painted drawer unit."
+  },
+  {
+    "id": "game_scene",
+    "tier": "hard",
+    "prompt": "Create a small low-poly game scene on a 10 m x 10 m grass ground: a cozy cottage (walls, pitched roof, a door, two windows, a chimney), a stone well with a small wooden roof, a wooden fence along one side of the ground, two stylized trees (trunk + foliage), and a dirt path from the cottage door to the well. Game-ready low-poly style with a distinct color material per element. Keep the whole scene under 20,000 vertices."
+  },
+  {
+    "id": "kitchen",
+    "tier": "hard",
+    "prompt": "Create a small kitchen corner: a floor and two walls meeting at a right angle, an L-shaped run of base cabinets along both walls with a continuous countertop on top, a sink with a faucet set into the countertop, two upper wall cabinets mounted above the countertop, and a simple handle on every cabinet door. Keep the whole scene under 20,000 vertices."
+  }
+]
