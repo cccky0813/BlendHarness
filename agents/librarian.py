@@ -73,3 +73,26 @@ def propose_skills(llm: LLMClient, request: str, script: str, existing_index: st
         span.set(n_proposed=len(proposal.skills), names=[s.name for s in proposal.skills],
                  parse_error=proposal.parse_error)
         return proposal
+
+
+REVISE_PROMPT = LIBRARIAN_PROMPT.split("Reply with ONLY a JSON object:")[0] + """
+Some candidate skills were REJECTED by automatic checks. For each one you get its code and the reason.
+Fix the code so it passes (keep the name). Typical fixes: shift every part so the component rests on
+location z (lowest point at location z), connect loose parts, fix API errors. If a candidate cannot be
+fixed, leave it out.
+
+Reply with ONLY a JSON object:
+{"skills": [{"name": "...", "description": "...", "tags": [...], "usage": "...", "code": "<fixed python source>"}]}
+"""
+
+
+def revise_skills(llm: LLMClient, rejected: list[tuple[Skill, str, str]], source_task: str) -> Proposal:
+    """Repair round: rejection reasons go back to the model (error as observation), one attempt."""
+    with llm.tracer.span("agent", "librarian_repair", n=len(rejected)) as span:
+        parts = [f"### {sk.name} (rejected at {gate}: {reason})\ndescription: {sk.description}\n"
+                 f"```python\n{sk.code}\n```" for sk, gate, reason in rejected]
+        resp = llm.chat([{"role": "system", "content": REVISE_PROMPT},
+                         {"role": "user", "content": "\n\n".join(parts)}], agent="librarian")
+        proposal = parse_proposal(resp.text, source_task)
+        span.set(n_revised=len(proposal.skills), parse_error=proposal.parse_error)
+        return proposal
