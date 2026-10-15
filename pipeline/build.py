@@ -21,7 +21,7 @@ from harness.tracing import Tracer
 from tools.blender_session import BlenderSession
 from tools.blender_tools import BlenderTools, diff_snapshots
 
-REFINE_TEMPLATE = """Revise an existing Blender model.
+REFINE_TEMPLATE_NO_EDIT = """Revise an existing Blender model.
 
 Original request:
 {request}
@@ -34,15 +34,35 @@ Current script (it runs without errors):
 A visual review of renders of this model found these problems:
 {issues}
 
-Fix these problems, keeping everything that is already good. The script above is already loaded as
-the current working script: make each fix with edit_script (exact old_string -> new_string, one call per
-separate change) instead of resending the whole script. Then check with inspect_scene, and only then reply
+Fix these problems, keeping everything that is already good. Run the complete revised script with
+execute_bpy. Then check with inspect_scene, and only then reply with a short summary."""
+
+# With edit tools the script is not repeated here: the context policy pins the current version.
+REFINE_TEMPLATE = """Revise an existing Blender model.
+
+Original request:
+{request}
+
+The current working script runs without errors and is shown at the end of your context.
+
+A visual review of renders of this model found these problems:
+{issues}
+
+Fix these problems, keeping everything that is already good: make ALL the fixes in ONE edit_script call
+(a list of exact old_string -> new_string replacements). Then check with inspect_scene, and only then reply
 with a short summary."""
 
-REFINE_TEMPLATE_NO_EDIT = REFINE_TEMPLATE.replace(
-    "The script above is already loaded as\nthe current working script: make each fix with edit_script (exact "
-    "old_string -> new_string, one call per\nseparate change) instead of resending the whole script.",
-    "Run the complete revised script with execute_bpy.")
+
+# Edit tools but no compaction (ablation): no pinned script in context, so the task must carry it.
+REFINE_TEMPLATE_EDIT_NO_PIN = REFINE_TEMPLATE.replace(
+    "The current working script runs without errors and is shown at the end of your context.",
+    "Current working script (it runs without errors):\n```python\n{script}\n```")
+
+
+def refine_template(cfg: "BuildConfig") -> str:
+    if not cfg.edit_tools:
+        return REFINE_TEMPLATE_NO_EDIT
+    return REFINE_TEMPLATE if cfg.compact_context else REFINE_TEMPLATE_EDIT_NO_PIN
 
 
 @dataclass
@@ -88,7 +108,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                            compact_context=cfg.compact_context, edit_tools=cfg.edit_tools)
         critic_llm = LLMClient(cfg.critic_model, tracer, extra_body=effort_body(cfg.critic_model, cfg.critic_effort))
         verifier_llm = critic_llm  # same model by default; still a separate role with its own prompt
-        refine = REFINE_TEMPLATE if cfg.edit_tools else REFINE_TEMPLATE_NO_EDIT
+        refine = refine_template(cfg)
 
         with tracer.span("run", "build", prompt=prompt, config=asdict(cfg)):
             # Round 0: build from the prompt, then an open-ended critique.
@@ -109,7 +129,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                     if approved:
                         break
                     before_snapshot, before_renders = blender.snapshot(), renders
-                    result = coder.run(refine.format(request=prompt, script=blender.current_script, issues=feedback))
+                    result = coder.run(refine.format(request=prompt, script=blender.current_script, issues=feedback))  # {script} unused by the edit template
                     renders = blender.render(f"round{rnd}", num_views=3)
                     diff = diff_snapshots(before_snapshot, blender.snapshot())
                     check = verify(verifier_llm, prompt, open_issues, before_renders, renders, diff)

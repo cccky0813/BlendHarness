@@ -17,10 +17,12 @@ Messages = list[dict[str, Any]]
 ContextPolicy = Callable[[Messages], Messages]
 
 
-def omit_large_tool_args(messages: Messages, keep_last: int = 1, min_chars: int = 1500) -> Messages:
+def omit_large_tool_args(messages: Messages, keep_last: int = 1, min_chars: int = 1500,
+                         keep: Callable[[Messages, dict], bool] | None = None) -> Messages:
     """Replace big string arguments of older tool calls (e.g. full scripts) with a short placeholder.
 
-    The `keep_last` most recent large calls stay intact (the model may need to fix or edit them).
+    The `keep_last` most recent large calls stay intact, plus any call for which `keep(messages, call)`
+    is True (e.g. a failed script the model still has to fix).
     """
     out = copy.deepcopy(messages)
     large = []  # (message index, tool-call index) of calls with large arguments, oldest first
@@ -28,7 +30,10 @@ def omit_large_tool_args(messages: Messages, keep_last: int = 1, min_chars: int 
         for ci, tc in enumerate(m.get("tool_calls") or []):
             if len(tc["function"].get("arguments") or "") >= min_chars:
                 large.append((mi, ci))
-    for version, (mi, ci) in enumerate(large[:-keep_last] if keep_last else large, start=1):
+    to_omit = large[:-keep_last] if keep_last else large
+    if keep:
+        to_omit = [(mi, ci) for mi, ci in to_omit if not keep(out, out[mi]["tool_calls"][ci])]
+    for version, (mi, ci) in enumerate(to_omit, start=1):
         fn = out[mi]["tool_calls"][ci]["function"]
         try:
             args = json.loads(fn["arguments"])
@@ -62,6 +67,21 @@ def omit_stale_code_blocks(messages: Messages, is_superseded: Callable[[Messages
             m["content"],
         )
     return out
+
+
+def tool_result_for(messages: Messages, call_id: str) -> str:
+    """The content of the tool result that answers tool call `call_id` ('' if none yet)."""
+    for m in messages:
+        if m.get("role") == "tool" and m.get("tool_call_id") == call_id:
+            return str(m.get("content", ""))
+    return ""
+
+
+def pin_at_end(messages: Messages, text: str) -> Messages:
+    """Append a 'pinned' message that always shows the up-to-date version of something the model works
+    on (e.g. the current script). It lives only in the view, never in the stored history, and sits at the
+    END so the earlier prefix stays unchanged (friendlier to prompt caching than rewriting old messages)."""
+    return messages + [{"role": "user", "content": text}]
 
 
 def size_chars(messages: Messages) -> int:

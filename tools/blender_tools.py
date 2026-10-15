@@ -54,29 +54,34 @@ class BlenderTools:
         out = r.output.strip()
         return ToolResult(f"OK: script ran in {r.duration_s}s. {summary}" + (f"\n--- stdout ---\n{out[-1500:]}" if out else ""))
 
-    def edit_script(self, old_string: str, new_string: str) -> ToolResult:
-        """Replace one exact snippet of current_script, then run the edited script.
+    def edit_script(self, edits: list[dict]) -> ToolResult:
+        """Apply several exact replacements to current_script in one call, then run the result once.
 
-        Transactional: the edit is kept only if the edited script runs; otherwise current_script
-        stays as it was, so the model always edits a known-good version.
+        All-or-nothing: every old_string must occur exactly once (checked in order, on the text as edited
+        so far); if any edit doesn't match or the edited script fails, NOTHING is applied and
+        current_script stays the last known-good version.
         """
         if not self.current_script:
             return ToolResult("ERROR: there is no script yet; create one with execute_bpy first.", True)
-        count = self.current_script.count(old_string)
-        if count == 0:
-            return ToolResult("ERROR: old_string not found in the current script. It must match exactly, "
-                              "including indentation. Use view_script to see the current version.", True)
-        if count > 1:
-            return ToolResult(f"ERROR: old_string occurs {count} times; include more surrounding lines "
-                              "so it is unique.", True)
-        edited = self.current_script.replace(old_string, new_string, 1)
+        if not isinstance(edits, list) or not edits:
+            return ToolResult("ERROR: edits must be a non-empty list of {old_string, new_string}.", True)
+        edited = self.current_script
+        for i, e in enumerate(edits, 1):
+            old, new = e.get("old_string", ""), e.get("new_string", "")
+            count = edited.count(old) if old else 0
+            if count != 1:
+                why = "not found" if count == 0 else f"occurs {count} times (add surrounding lines to make it unique)"
+                return ToolResult(f"ERROR: edit {i} of {len(edits)}: old_string {why}. No edits were applied; "
+                                  "the current script is unchanged and shown in full in your context.", True)
+            edited = edited.replace(old, new, 1)
         before = self.current_script
         result = self.execute_bpy(edited)          # sets current_script only on success
         if result.is_error:
-            self.current_script = before           # (already unchanged; explicit for clarity)
-            return ToolResult("ERROR: the edited script failed, edit NOT applied (current script unchanged).\n"
-                              + result.content.removeprefix("ERROR: "), True)
-        return ToolResult(result.content.replace("OK: script ran", "OK: edit applied, script ran", 1))
+            self.current_script = before
+            return ToolResult(f"ERROR: the edited script failed, none of the {len(edits)} edits were applied "
+                              "(current script unchanged).\n" + result.content.removeprefix("ERROR: "), True)
+        return ToolResult(result.content.replace("OK: script ran",
+                                                 f"OK: {len(edits)} edit(s) applied, script ran", 1))
 
     def view_script(self, start_line: int = 1, end_line: int | None = None) -> ToolResult:
         """Show part of current_script with line numbers (paged, so long scripts are fully readable)."""
@@ -143,15 +148,20 @@ class BlenderTools:
             Tool(
                 name="edit_script",
                 description=(
-                    "Change part of the current working script without resending all of it: replaces the "
-                    "exact text old_string (must occur exactly once) with new_string, then runs the full "
-                    "edited script in a fresh scene. Kept only if it runs without error. Prefer this over "
-                    "execute_bpy for targeted fixes; call it several times for several separate changes."
+                    "Change the current working script without resending all of it. Give ALL the changes you "
+                    "need as a list of exact replacements in ONE call: each old_string must occur exactly once "
+                    "(applied in order). Then the edited script runs once in a fresh scene. All-or-nothing: if "
+                    "any edit does not match or the script fails, nothing is applied. The current script is "
+                    "always shown in full at the end of your context."
                 ),
                 parameters={"type": "object",
-                            "properties": {"old_string": {"type": "string", "description": "Exact text to replace."},
-                                           "new_string": {"type": "string", "description": "Replacement text."}},
-                            "required": ["old_string", "new_string"]},
+                            "properties": {"edits": {
+                                "type": "array",
+                                "items": {"type": "object",
+                                          "properties": {"old_string": {"type": "string", "description": "Exact text to replace."},
+                                                         "new_string": {"type": "string", "description": "Replacement text."}},
+                                          "required": ["old_string", "new_string"]}}},
+                            "required": ["edits"]},
                 fn=self.edit_script,
             ),
             Tool(
