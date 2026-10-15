@@ -113,6 +113,7 @@ class LLMClient:
             completion = self._create_with_retry(messages, tools, span)
             resp = self._parse(completion)
             span.set(
+                request_id=getattr(completion, "id", None),  # provider's id: quote it in support tickets
                 input_tokens=resp.input_tokens,
                 output_tokens=resp.output_tokens,
                 cached_tokens=resp.cached_tokens,
