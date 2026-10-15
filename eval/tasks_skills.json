@@ -1,0 +1,67 @@
+[
+  {
+    "id": "chair",
+    "split": "train",
+    "tier": "easy",
+    "prompt": "Create a wooden dining chair: four legs, a square seat, a backrest with three vertical slats between two back posts, and side stretchers connecting the front and back legs near the floor. Natural wood material."
+  },
+  {
+    "id": "lamp",
+    "split": "train",
+    "tier": "medium",
+    "prompt": "Create a desk lamp: a round weighted base, an adjustable arm made of two straight segments joined by a visible hinge, and a cone-shaped lampshade at the end of the arm with a glowing bulb visible inside. Matte black metal with a warm emissive bulb."
+  },
+  {
+    "id": "desk",
+    "split": "train",
+    "tier": "medium",
+    "prompt": "Create a writing desk: a rectangular top, four legs, and a drawer unit under the right side of the top with three stacked drawers, each drawer front with a small metal handle. Oak wood top and legs, white painted drawer unit."
+  },
+  {
+    "id": "kitchen",
+    "split": "train",
+    "tier": "hard",
+    "prompt": "Create a small kitchen corner: a floor and two walls meeting at a right angle, an L-shaped run of base cabinets along both walls with a continuous countertop on top, a sink with a faucet set into the countertop, two upper wall cabinets mounted above the countertop, and a simple handle on every cabinet door. Keep the whole scene under 20,000 vertices."
+  },
+  {
+    "id": "game_scene",
+    "split": "train",
+    "tier": "hard",
+    "prompt": "Create a small low-poly game scene on a 10 m x 10 m grass ground: a cozy cottage (walls, pitched roof, a door, two windows, a chimney), a stone well with a small wooden roof, a wooden fence along one side of the ground, two stylized trees (trunk + foliage), and a dirt path from the cottage door to the well. Game-ready low-poly style with a distinct color material per element. Keep the whole scene under 20,000 vertices."
+  },
+  {
+    "id": "bar_stool",
+    "split": "test",
+    "tier": "easy",
+    "pair": "chair",
+    "prompt": "Create a tall wooden bar stool: four long legs, a round seat about 75 cm high, a low backrest with two slats, and a ring of footrest stretchers connecting the legs. Natural wood material."
+  },
+  {
+    "id": "floor_lamp",
+    "split": "test",
+    "tier": "medium",
+    "pair": "lamp",
+    "prompt": "Create a floor lamp: a heavy round base on the floor, a tall straight pole about 1.6 m high, an adjustable two-segment arm with a visible hinge at the top of the pole, and a cone-shaped lampshade with a glowing bulb inside. Matte black metal with a warm emissive bulb."
+  },
+  {
+    "id": "nightstand",
+    "split": "test",
+    "tier": "medium",
+    "pair": "desk",
+    "prompt": "Create a bedside nightstand: a rectangular cabinet on four short legs with two stacked drawers, each drawer front with a small round knob, and a small open shelf below the drawers. Walnut wood body with brass knobs."
+  },
+  {
+    "id": "vanity",
+    "split": "test",
+    "tier": "hard",
+    "pair": "kitchen",
+    "prompt": "Create a bathroom vanity: a floor and a wall behind it, a base cabinet with two doors and handles against the wall, a countertop on the cabinet with a sink basin set into it and a faucet behind the basin, and a rectangular mirror mounted on the wall above. Keep the whole scene under 20,000 vertices."
+  },
+  {
+    "id": "village",
+    "split": "test",
+    "tier": "hard",
+    "pair": "game_scene",
+    "prompt": "Create a small low-poly village on a 14 m x 14 m grass ground: two cottages of different sizes (walls, pitched roof, a door, windows, a chimney), three stylized trees, a stone well in the middle, and dirt paths connecting each cottage door to the well. Game-ready low-poly style with a distinct color material per element. Keep the whole scene under 30,000 vertices."
+  }
+]
