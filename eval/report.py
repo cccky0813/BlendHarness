@@ -18,9 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--exp", required=True)
+parser.add_argument("--task-file", default="eval/tasks.json")
 args = parser.parse_args()
 exp_dir = ROOT / "runs" / "eval" / args.exp
-tiers = {t["id"]: t["tier"] for t in json.loads((ROOT / "eval" / "tasks.json").read_text(encoding="utf-8"))}
+tiers = {t["id"]: t["tier"] for t in json.loads((ROOT / args.task_file).read_text(encoding="utf-8"))}
 
 ISSUE_CATEGORIES = [  # first match wins; keyword lists are deliberately simple and inspectable
     ("floating / detached", r"float|detach|not attached|hover|mid-air|gap|not touching|not connected"),
@@ -83,10 +84,11 @@ for variant_dir in sorted(p for p in exp_dir.iterdir() if p.is_dir()):
             crashes[variant_dir.name].append((task_id, json.loads((run_dir / "crash.json").read_text())["error"]))
 
 lines = [f"# Eval report: {args.exp}", ""]
-manifest = exp_dir / "manifest.json"
-if manifest.exists():
+for manifest in sorted(exp_dir.glob("manifest*.json")):
     m = json.loads(manifest.read_text())
-    lines += [f"git commit `{m['git_commit']}`, started {m['started']}, repeats {m['repeats']}", ""]
+    lines += [f"- {manifest.stem}: git `{m['git_commit']}`, started {m['started']}, repeats {m['repeats']}, "
+              f"skills at start: {len(m.get('skills_at_start', []))}"]
+lines.append("")
 
 lines += ["## Overall", "",
           "| variant | runs | passed | pass rate | avg rounds | avg execs (failed) | avg total cost | avg coder cost | "
@@ -128,6 +130,23 @@ for variant, rows in results.items():
               f"- issues still open at the end, by category: {dict(still_open.most_common()) or 'none'}", ""]
     for task_id, err in crashes.get(variant, []):
         lines.append(f"- CRASH {task_id}: {err[:160]}")
+
+lines += ["## Skills (M4)", ""]
+for variant, rows in results.items():
+    loaded = [r.get("skills_loaded", []) for _, r, _ in rows]
+    learned = [(t, r.get("skills_learned", {})) for t, r, _ in rows if r.get("skills_learned", {}).get("proposed")]
+    if any(loaded):
+        from collections import Counter as _C
+        top = _C(n for names in loaded for n in names).most_common(6)
+        lines.append(f"- {variant}: runs that loaded >=1 skill: {sum(bool(x) for x in loaded)}/{len(loaded)}, "
+                     f"avg skills loaded {mean([len(x) for x in loaded]):.1f}, most used: {dict(top)}")
+    for task_id, l in learned:
+        lines.append(f"- {variant}/{task_id}: proposed {l.get('proposed')}, added {l.get('added')}, "
+                     f"rejected {[x['name'] + ' (' + x['gate'] + ')' for x in l.get('rejected', [])]}")
+skills_dir = exp_dir / "skills"
+if skills_dir.exists():
+    lines.append(f"- library now: {sorted(p.parent.name for p in skills_dir.glob('*/skill.py'))}")
+lines.append("")
 
 report = "\n".join(lines) + "\n"
 (exp_dir / "report.md").write_text(report, encoding="utf-8")

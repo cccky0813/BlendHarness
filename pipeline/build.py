@@ -82,6 +82,7 @@ class BuildConfig:
     skills_dir: str | None = None              # M4: skill library folder (None = no skills)
     learn_skills: bool = False                 # M4: after an approved build, extract + admit new skills
     librarian_model: str | None = None         # default: coder_model
+    track_skill_usage: bool = True             # update stats.json (off = frozen library for a fair test)
 
 
 def effort_body(model: str, effort: str) -> dict | None:
@@ -178,7 +179,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
                 f"rejected {[r['name'] + ' (' + r['gate'] + ')' for r in admission.rejected]}")
 
         (run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
-        for name in (skill_tools.loaded if skill_tools else []):  # quality signal: was the task approved?
+        for name in (skill_tools.loaded if skill_tools and cfg.track_skill_usage else []):  # quality signal
             skills.record_use(name, success=approved)
         total = tracer.summary()
         record = {
