@@ -55,14 +55,15 @@ def parse_critique(text: str) -> Critique:
     return Critique(False, [{"problem": text.strip()[:500], "fix": ""}], parse_error=True, raw=text)
 
 
-def critique(llm: LLMClient, request: str, renders: list[str], scene_text: str) -> Critique:
+def critique(llm: LLMClient, request: str, renders: list[str], scene_text: str,
+             system_prompt: str = CRITIC_PROMPT) -> Critique:
     with llm.tracer.span("agent", "critic", n_images=len(renders)) as span:
         user = image_message(
             f"User request:\n{request}\n\nScene objects:\n{scene_text}\n\n"
             f"{len(renders)} renders follow (last one is the top-down view).",
             renders,
         )
-        resp = llm.chat([{"role": "system", "content": CRITIC_PROMPT}, user], agent="critic")
+        resp = llm.chat([{"role": "system", "content": system_prompt}, user], agent="critic")
         result = parse_critique(resp.text)
         span.set(approved=result.approved, n_issues=len(result.issues), parse_error=result.parse_error,
                  cost_usd=resp.cost_usd)
