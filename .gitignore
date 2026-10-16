@@ -11,3 +11,6 @@ runs/
 
 # macOS
 .DS_Store
+
+# personal notes (not published)
+docs/开发日志与面试笔记.md
