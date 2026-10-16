@@ -51,5 +51,7 @@
 
 ### M4: self-evolving skill library (as built)
 - Skills stored in Agent-Skills style (name, description, instructions, code); only the skill index sits in context, `load_skill(name)` loads the body (progressive disclosure).
-- Experience memory: error signature → successful fix; hybrid BM25 + embedding retrieval; SQLite + numpy.
-- Evidence: learning curve (tasks seen → success rate / retries / cost) + held-out test set. Not RSI: no weight updates.
+- Library on disk: one folder per skill (SKILL.md + skill.py + stats.json); librarian distils approved builds;
+  admission gates: static -> dedup (Jaccard) -> sandbox run -> structure (grounded + connected) + visual; one repair round.
+- Not built: error-experience memory (planned design: error signature -> fix, BM25 + embedding retrieval, SQLite + numpy).
+- Evidence: learning curve on held-out test tasks (skills_lc). Not RSI: no weight updates.
