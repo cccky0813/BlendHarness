@@ -1,6 +1,6 @@
-# blender-agent
+# BlendHarness
 
-**一个多模态多 Agent 系统：通过编写 Blender Python 代码，把自然语言描述变成可编辑的 3D 场景。底层是从零实现的 Agent harness。**
+**一个可自我进化的 Blender 多 Agent harness：通过编写 Blender Python 代码，把自然语言描述变成可编辑的 3D 场景。底层是从零实现的 Agent harness。**
 
 [English](README.md)
 
