@@ -1,6 +1,6 @@
-# blender-agent
+# BlendHarness
 
-**A multimodal multi-agent system that turns natural language into editable 3D scenes by writing Blender Python, built on a from-scratch agent harness.**
+**A self-evolving multi-agent harness for Blender: it turns natural language into editable 3D scenes by writing Blender Python, on top of an agent harness built from scratch.**
 
 [中文说明](README.zh-CN.md)
 
