@@ -1,16 +1,22 @@
 # Roadmap & design decisions
 
 ## Done
-- `harness/tracing.py` — span tree (run → agent → llm / tool), JSONL trace + payload side files
-- `harness/llm.py` — multi-provider OpenAI-compatible client, retries with backoff, config errors fail fast, cost
-- `harness/loop.py` — agent loop: error-as-observation, budgets (max_steps / max_same_error / max_cost), every tool call answered
+- Harness: span tracing; streaming multi-provider LLM client (retries, cost, incomplete-stream detection); agent loop
+  (error-as-observation, budgets, truncation handling, completion checks, context-policy hook); context building blocks
+- Process-isolated Blender sandbox (long-lived headless Blender, reset per run, watchdog)
+- Agents: Coder (AgentLoop), Critic, Verifier, Librarian (single calls); thinking effort per agent
+- M3 context management v2: pinned current script + batched transactional edits (eval: 6/6 hard tasks, -14% cost)
+- Eval harness: task sets, resumable crash-isolated parallel runner, interleaved variants, trace-based reports
+- M4 skill library: storage + progressive disclosure (SkillTools), librarian, 4 admission gates + repair round,
+  learning-curve experiment (finding: adoption 4/10 is the bottleneck; skills too coarse)
 
-## Next
-1. **Blender sandbox** (`tools/blender_session.py`) — long-lived headless Blender per task, reset scene + run full script on every exec, watchdog timeout → kill & restart
-2. **Blender tools** — `execute_bpy`, `render`, `inspect_scene` (port Scene-Inspector), `search_docs`
-3. **Single Coder agent end-to-end** on 3 prompts → first real cost numbers
-4. **Orchestration layer** (Planner → Coder → Critic → Verifier)
-5. M3 context management · M4 self-evolving skill & experience library · M5 eval harness
+## Next (prioritized)
+1. M4: distil fine-grained composable parts; harness retrieves and recommends top-k skills per request; re-test 4 tasks x 3
+2. Stage-based model routing / reasoning control for revision rounds; failure-driven cascade vs all-cheap / all-strong
+3. Phase-level checkpoints (resume / fork from any stage)
+4. Polish: render colors, liquid highlights, post-verify critic pass for regressions
+5. Larger samples (3-5 repeats) for key experiments
+6. (Low priority) error-experience memory; RAG only if API-knowledge errors become significant
 
 ## Design decisions to keep
 ### Phase-level checkpoint (orchestration layer)
@@ -43,7 +49,7 @@
 ### Eval-layer resume
 - One result file per task; on restart skip tasks that already have a result.
 
-### M4: self-evolving skill & experience library
+### M4: self-evolving skill library (as built)
 - Skills stored in Agent-Skills style (name, description, instructions, code); only the skill index sits in context, `load_skill(name)` loads the body (progressive disclosure).
 - Experience memory: error signature → successful fix; hybrid BM25 + embedding retrieval; SQLite + numpy.
 - Evidence: learning curve (tasks seen → success rate / retries / cost) + held-out test set. Not RSI: no weight updates.
