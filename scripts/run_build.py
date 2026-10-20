@@ -1,17 +1,15 @@
-"""Run the Coder + Critic + Verifier pipeline (pipeline/build.py) on one prompt from the command line.
+"""Run the Coder + Critic + Verifier pipeline (blendharness/workflow/build.py) on one prompt from the command line.
 
 Usage: python scripts/run_build.py "prompt" [--model claude-sonnet-4-6] [--critic-model claude-haiku-4-5]
                                    [--rounds 2] [--effort low] [--no-edit] [--no-compact]
 """
 
 import argparse
-import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pipeline.build import BuildConfig, run_build  # noqa: E402
+from blendharness.workflow.build import BuildConfig, run_build
 
 DEFAULT_PROMPT = (
     "Create a realistic ceramic coffee mug: cylindrical body with a hollow open top and visible wall "

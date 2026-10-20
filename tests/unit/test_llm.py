@@ -9,8 +9,8 @@ from types import SimpleNamespace as NS
 import openai
 import pytest
 
-from harness import llm as llm_module
-from harness.llm import IncompleteStreamError, LLMClient
+from blendharness.core.llm import client as llm_module
+from blendharness.core.llm import IncompleteStreamError, LLMClient
 
 
 def chunk(content=None, tool_calls=None, finish=None, usage=None):

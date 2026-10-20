@@ -1,16 +1,14 @@
-"""Smoke test for harness/llm.py: plain chat, function calling, and error tracing.
+"""Smoke test for blendharness/core/llm: plain chat, function calling, and error tracing.
 
 Usage: python scripts/smoke_llm.py [model]
 """
 
 import json
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harness.llm import LLMClient  # noqa: E402
-from harness.tracing import Tracer  # noqa: E402
+from blendharness.core.llm import LLMClient
+from blendharness.core.tracing import Tracer
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "deepseek-flash"
 

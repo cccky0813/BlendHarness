@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.blender_session import DEFAULT_BLENDER, BlenderSession
-from tools.blender_tools import BlenderTools
+from blendharness.sandbox.session import DEFAULT_BLENDER, BlenderSession
+from blendharness.tools.blender_tools import BlenderTools
 
 pytestmark = [
     pytest.mark.blender,

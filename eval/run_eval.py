@@ -1,4 +1,4 @@
-"""Batch evaluation: run every task x variant x repeat through pipeline/build.py.
+"""Batch evaluation: run every task x variant x repeat through blendharness/workflow/build.py.
 
 - Resumable: a job whose result.json exists is skipped, so an interrupted experiment just restarts.
 - Isolated: one job crashing (API outage, bug) is recorded in crash.json and does not stop the others;
@@ -23,10 +23,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, replace
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+from blendharness.workflow.build import BuildConfig, run_build
 
-from pipeline.build import BuildConfig, run_build  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
 
 VARIANTS = {
     "baseline": BuildConfig(edit_tools=False, compact_context=False),  # before M3 (full rewrites, full history)

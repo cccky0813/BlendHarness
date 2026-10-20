@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from harness.tracing import Tracer
+from blendharness.core.tracing import Tracer
 from tests.fakes import FakeSession, ScriptedLLM
 
 

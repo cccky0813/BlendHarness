@@ -4,7 +4,8 @@ Each test replays a fixed sequence of model replies and checks what the harness 
 After the loop is split into runtime + rails (P2) these tests must still pass unchanged.
 """
 
-from harness.loop import AgentLoop, Tool, ToolResult
+from blendharness.core.runtime import AgentLoop
+from blendharness.core.tools import Tool, ToolResult
 from tests.fakes import call, reply
 
 

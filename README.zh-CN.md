@@ -106,7 +106,7 @@ flowchart TB
 
 ```bash
 conda create -n blender-agent python=3.12 -y && conda activate blender-agent
-pip install -r requirements.txt
+pip install -e ".[dev]"        # 以可编辑模式安装 blendharness 包（含 pytest）
 cp .env.example .env        # 填写 OPENAI_BASE_URL / OPENAI_API_KEY（如果用 DeepSeek，再填 DEEPSEEK_*）
 # Blender 路径默认是 /Applications/Blender.app/Contents/MacOS/Blender，可以用 BLENDER_PATH 覆盖
 ```

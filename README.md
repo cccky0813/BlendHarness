@@ -96,7 +96,7 @@ Lessons that shaped the design, each found through traces or evals:
 
 ```bash
 conda create -n blender-agent python=3.12 -y && conda activate blender-agent
-pip install -r requirements.txt
+pip install -e ".[dev]"        # installs the blendharness package (+ pytest)
 cp .env.example .env        # fill in OPENAI_BASE_URL / OPENAI_API_KEY (and DEEPSEEK_* if used)
 # Blender path defaults to /Applications/Blender.app/Contents/MacOS/Blender; override with BLENDER_PATH
 ```

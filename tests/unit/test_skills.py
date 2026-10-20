@@ -2,8 +2,8 @@
 
 import pytest
 
-from memory.skill_library import Skill, SkillLibrary, validate_skill_code
-from tools.skill_tools import SkillTools
+from blendharness.memory.skills import Skill, SkillLibrary, validate_skill_code
+from blendharness.tools.skill_tools import SkillTools
 
 GOOD = '''"""A leg."""
 import bpy
