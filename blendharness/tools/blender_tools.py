@@ -10,7 +10,7 @@ The render script and Scene-Inspector are ported from the original LL3M_demo1 pr
 import re
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TypedDict
 
 from blendharness.core.tools import Tool, ToolResult
 from blendharness.sandbox.guard import check_code
@@ -19,6 +19,11 @@ from blendharness.tools.render import RENDER_PREFIX, RENDER_SCRIPT
 from blendharness.tools.scene import SCENE_INSPECTOR_SCRIPT, SCENE_PREFIX, extract_prefixed_json
 
 VIEW_PAGE_LINES = 120
+
+
+class Edit(TypedDict):
+    old_string: str     # exact text to replace (must occur exactly once)
+    new_string: str
 
 
 class BlenderTools:
@@ -65,7 +70,7 @@ class BlenderTools:
         out = r.output.strip()
         return ToolResult(f"OK: script ran in {r.duration_s}s. {summary}" + (f"\n--- stdout ---\n{out[-1500:]}" if out else ""))
 
-    def edit_script(self, edits: list[dict]) -> ToolResult:
+    def edit_script(self, edits: list[Edit]) -> ToolResult:
         """Apply several exact replacements to current_script in one call, then run the result once.
 
         All-or-nothing: every old_string must occur exactly once (checked in order, on the text as edited
