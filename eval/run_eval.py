@@ -2,7 +2,8 @@
 
 - Resumable: a job whose result.json exists is skipped, so an interrupted experiment just restarts.
 - Isolated: one job crashing (API outage, bug) is recorded in crash.json and does not stop the others;
-  crashed jobs have no result.json, so they are retried on the next start.
+  crashed jobs have no result.json, so they are retried on the next start, continuing from their
+  latest checkpoint (phases already done, e.g. round 0, are not paid for twice).
 - Fair ordering: jobs are interleaved (repeat -> task -> variant) so variants run under similar API
   conditions instead of one variant first and the other an hour later.
 
@@ -110,7 +111,7 @@ def run_job(job) -> str:
 
     t0 = time.perf_counter()
     try:
-        rec = run_build(task["prompt"], config_for(variant), out, log=log)
+        rec = run_build(task["prompt"], config_for(variant), out, log=log, resume=True)
         return (f"{tag} {rec['status']} | rounds={rec['n_rounds']} | ${rec['llm_total']['cost_usd']:.3f} | "
                 f"{rec['wall_time_s']:.0f}s")
     except Exception as exc:  # isolate: one failing job must not kill the experiment
