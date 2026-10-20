@@ -58,3 +58,9 @@ def test_every_layer_is_known():
 def test_sandbox_server_is_self_contained():
     """server.py runs inside Blender's own Python, where our package is not installed."""
     assert blendharness_imports(PACKAGE / "sandbox" / "server.py") == set()
+
+
+def test_rails_do_not_depend_on_the_runtime():
+    """The runtime consults rails, never the other way round (it would also be a circular import)."""
+    for path in (PACKAGE / "core" / "rails").glob("*.py"):
+        assert "blendharness.core.runtime" not in path.read_text(encoding="utf-8"), path.name
