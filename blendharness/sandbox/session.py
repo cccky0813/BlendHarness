@@ -57,14 +57,15 @@ class BlenderSession:
     def start(self) -> None:
         port = _free_port()
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        log = open(self.log_path, "ab")
         t0 = time.perf_counter()
         # Blender's output goes to a log file, NOT a pipe: an unread pipe fills up and
-        # blocks Blender forever once its buffer (~64KB) is full.
-        self.proc = subprocess.Popen(
-            [self.blender_path, "-b", "--factory-startup", "--python", str(SERVER_SCRIPT), "--", "--port", str(port)],
-            stdout=log, stderr=subprocess.STDOUT,
-        )
+        # blocks Blender forever once its buffer (~64KB) is full. The child gets its own copy of
+        # the file descriptor, so ours is closed right away (one leaked handle per restart otherwise).
+        with open(self.log_path, "ab") as log:
+            self.proc = subprocess.Popen(
+                [self.blender_path, "-b", "--factory-startup", "--python", str(SERVER_SCRIPT), "--", "--port", str(port)],
+                stdout=log, stderr=subprocess.STDOUT,
+            )
         deadline = time.monotonic() + self.startup_timeout_s
         while True:  # the server needs a few seconds before it accepts connections
             if self.proc.poll() is not None:

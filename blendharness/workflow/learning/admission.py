@@ -1,6 +1,6 @@
 """Admission gates for candidate skills: only verified code enters long-term memory.
 
-    1. static check   - name, build_<name> defined, no top-level side effects (no execution)
+    1. static check   - name, build_<name> defined, no top-level side effects, sandbox policy (no execution)
     2. dedup          - same name, or a description too similar to an existing skill
     3. sandbox run    - call the function with its defaults in an EMPTY scene: it must run and
                         produce at least one mesh (free: no LLM call)
@@ -23,6 +23,7 @@ from blendharness.agents.critic import critique
 from blendharness.agents.prompts import load_prompt
 from blendharness.core.llm import LLMClient
 from blendharness.memory.skills import Skill, SkillLibrary, validate_skill_code
+from blendharness.sandbox.guard import check_code
 from blendharness.sandbox.session import BlenderSession
 from blendharness.tools.blender_tools import BlenderTools
 
@@ -121,7 +122,7 @@ def admit(candidates: list[Skill], library: SkillLibrary, session: BlenderSessio
           critic_llm: Optional[LLMClient] = None, renders_dir="/tmp/skill_checks") -> AdmissionResult:
     result = AdmissionResult()
     for skill in candidates:
-        error = validate_skill_code(skill.name, skill.code)
+        error = validate_skill_code(skill.name, skill.code) or check_code(skill.code)
         if error:
             result.reject(skill, "static", error)
             continue

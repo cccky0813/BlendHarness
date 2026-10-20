@@ -49,4 +49,5 @@ class SkillTools:
             parameters={"type": "object", "properties": {"name": {"type": "string", "description": "Skill name."}},
                         "required": ["name"]},
             fn=self.load_skill,
+            permission="write",            # changes what every later script runs with
         )]
