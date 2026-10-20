@@ -9,11 +9,14 @@
 - Eval harness: task sets, resumable crash-isolated parallel runner, interleaved variants, trace-based reports
 - M4 skill library: storage + progressive disclosure (SkillTools), librarian, 4 admission gates + repair round,
   learning-curve experiment (finding: adoption 4/10 is the bottleneck; skills too coarse)
+- Restructuring (2026-10, behaviour unchanged): one package with enforced one-way layering; rails; context engine
+  (processor pipeline, calibrated token estimate, budget guard); ToolRegistry with permission tiers; static sandbox
+  guard; phase-level checkpoints (resume / fork); MCP server; 180 tests on fakes + real Blender. See architecture.md
 
 ## Next (prioritized)
 1. M4: distil fine-grained composable parts; harness retrieves and recommends top-k skills per request; re-test 4 tasks x 3
 2. Stage-based model routing / reasoning control for revision rounds; failure-driven cascade vs all-cheap / all-strong
-3. Phase-level checkpoints (resume / fork from any stage)
+3. Trace-based evaluation and self-evolution (plan in progress)
 4. Polish: render colors, liquid highlights, post-verify critic pass for regressions
 5. Larger samples (3-5 repeats) for key experiments
 6. (Low priority) error-experience memory; RAG only if API-knowledge errors become significant
