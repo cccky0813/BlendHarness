@@ -15,13 +15,11 @@ and the caller (orchestrator / eval runner / user session) chooses the fallback.
 from typing import Any, Optional
 
 from blendharness.core.context_engine import ContextPolicy, size_chars
-from blendharness.core.llm import LLMClient, LLMResponse, ToolCall
+from blendharness.core.llm import LLMClient, ToolCall
 from blendharness.core.rails import CompletionCheck, CompletionRail, CostBudgetRail, Rail, StuckRail, TruncationRail
 from blendharness.core.rails.events import Decision, LoopContext, Nudge, Stop
 from blendharness.core.runtime.types import LoopResult
-from blendharness.core.tools import Tool, ToolResult
-
-MAX_TOOL_OUTPUT_CHARS = 6000  # keep one huge tool output from flooding the context
+from blendharness.core.tools import Tool, ToolRegistry
 
 
 class AgentLoop:
@@ -30,7 +28,7 @@ class AgentLoop:
         name: str,
         llm: LLMClient,
         system_prompt: str,
-        tools: list[Tool],
+        tools: list[Tool] | ToolRegistry,
         max_steps: int = 20,                   # hard limit of the loop itself
         # Shortcuts for the standard rails (truncation and stuck are always on):
         max_same_error: int = 3,
@@ -42,7 +40,7 @@ class AgentLoop:
         self.name = name
         self.llm = llm
         self.system_prompt = system_prompt
-        self.tools = {t.name: t for t in tools}
+        self.tools = tools if isinstance(tools, ToolRegistry) else ToolRegistry(tools)
         self.max_steps = max_steps
         self.context_policy = context_policy
         standard: list[Rail] = [TruncationRail(), StuckRail(max_same_error)]
@@ -57,7 +55,7 @@ class AgentLoop:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": task},
         ]
-        tool_schemas = [t.schema() for t in self.tools.values()]
+        tool_schemas = self.tools.schemas()
 
         with self.llm.tracer.span("agent", self.name, task=task[:300]) as span:
             ctx = LoopContext(self.name, messages, span)
@@ -87,7 +85,7 @@ class AgentLoop:
                     continue
 
                 for i, call in enumerate(resp.tool_calls):
-                    result = self._execute(call)
+                    result = self.tools.execute(call, self.llm.tracer)
                     # id and result come from the same `call` -> they can never be mismatched
                     messages.append({"role": "tool", "tool_call_id": call.id, "content": result.content})
                     decision = self._ask("after_tool", ctx, call, result)
@@ -118,28 +116,6 @@ class AgentLoop:
         for call in calls:
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": "SKIPPED: agent stopped before running this call."})
-
-    def _execute(self, call: ToolCall) -> ToolResult:
-        """Run one tool call. Every failure becomes an error message the model can read."""
-        with self.llm.tracer.span("tool", call.name, args=call.arguments) as span:
-            tool = self.tools.get(call.name)
-            if tool is None:
-                result = ToolResult(f"ERROR: unknown tool '{call.name}'. Available: {list(self.tools)}", True)
-            elif "__invalid_json__" in call.arguments:
-                result = ToolResult(f"ERROR: arguments were not valid JSON: {call.arguments['__invalid_json__']}", True)
-            else:
-                try:
-                    out = tool.fn(**call.arguments)
-                    result = out if isinstance(out, ToolResult) else ToolResult(str(out))
-                except Exception as exc:  # a crashing tool must not crash the agent
-                    result = ToolResult(f"ERROR: {type(exc).__name__}: {exc}", True)
-
-            if len(result.content) > MAX_TOOL_OUTPUT_CHARS:
-                hidden = len(result.content) - MAX_TOOL_OUTPUT_CHARS
-                result.content = (result.content[:MAX_TOOL_OUTPUT_CHARS]
-                                  + f"\n...[truncated: {hidden} more chars not shown]")
-            span.set(is_error=result.is_error, output_preview=result.content[:300])
-            return result
 
     @staticmethod
     def _finish(ctx: LoopContext, status: str, text: str, reason: str = "") -> LoopResult:

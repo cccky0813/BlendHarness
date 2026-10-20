@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from blendharness.core.tools import Tool, ToolResult
+from blendharness.sandbox.guard import check_code
 from blendharness.sandbox.session import BlenderSession
 from blendharness.tools.render import RENDER_PREFIX, RENDER_SCRIPT
 from blendharness.tools.scene import SCENE_INSPECTOR_SCRIPT, SCENE_PREFIX, extract_prefixed_json
@@ -34,6 +35,10 @@ class BlenderTools:
 
     # ---------- tool functions (what the agent calls) ----------
     def execute_bpy(self, code: str) -> ToolResult:
+        blocked = check_code(code)          # static check first: nothing reaches Blender if it fails
+        if blocked:
+            self.history.append({"code": code, "ok": False, "error": blocked})
+            return ToolResult(f"ERROR: {blocked}", is_error=True)
         r = self.session.execute(self._with_skills(code), reset=True)
         r.traceback = self._map_lines(r.traceback)
         r.error = self._map_lines(r.error)
@@ -172,6 +177,7 @@ class BlenderTools:
                             "properties": {"code": {"type": "string", "description": "Full bpy script."}},
                             "required": ["code"]},
                 fn=self.execute_bpy,
+                permission="execute",
             ),
             Tool(
                 name="edit_script",
@@ -191,6 +197,7 @@ class BlenderTools:
                                           "required": ["old_string", "new_string"]}}},
                             "required": ["edits"]},
                 fn=self.edit_script,
+                permission="execute",
             ),
             Tool(
                 name="view_script",
@@ -201,6 +208,7 @@ class BlenderTools:
                                            "end_line": {"type": "integer", "description": "Last line (inclusive)."}},
                             "required": []},
                 fn=self.view_script,
+                permission="read",
             ),
             Tool(
                 name="inspect_scene",
@@ -211,6 +219,7 @@ class BlenderTools:
                 ),
                 parameters={"type": "object", "properties": {}, "required": []},
                 fn=self.inspect_scene,
+                permission="read",
             ),
         ]
         if not include_edit:  # ablation: full-script rewrites only (M3 baseline behaviour)
