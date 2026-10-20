@@ -37,12 +37,18 @@ class Span:
 
 
 class Tracer:
-    def __init__(self, run_dir: str | Path, run_id: Optional[str] = None) -> None:
+    def __init__(self, run_dir: str | Path, run_id: Optional[str] = None, resume: bool = False) -> None:
         self.run_id = run_id or time.strftime("%Y%m%d_%H%M%S")
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.run_dir / "trace.jsonl"
         self.spans: list[Span] = []
+        if resume and self.path.exists():  # a resumed run: earlier spans still count in summary()
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                try:
+                    self.spans.append(Span(**json.loads(line)))
+                except (json.JSONDecodeError, TypeError):
+                    continue           # a line cut off by the interruption
 
     @contextmanager
     def span(self, kind: str, name: str, **attrs: Any):

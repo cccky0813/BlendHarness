@@ -18,6 +18,7 @@ from blendharness.agents.critic import critique
 from blendharness.agents.prompts import load_prompt
 from blendharness.agents.verifier import verify
 from blendharness.core.llm import LLMClient
+from blendharness.core.session import Checkpointer
 from blendharness.core.tracing import Tracer
 from blendharness.memory.skills import SkillLibrary
 from blendharness.sandbox.session import BlenderSession
@@ -25,6 +26,7 @@ from blendharness.tools.blender_tools import BlenderTools
 from blendharness.tools.scene import diff_snapshots
 from blendharness.tools.skill_tools import SkillTools
 from blendharness.workflow.learning import learn_from_build
+from blendharness.workflow.state import BuildState
 
 REFINE_TEMPLATE_NO_EDIT = load_prompt("refine_full_script")
 
@@ -73,98 +75,178 @@ def effort_body(model: str, effort: str) -> dict | None:
 
 
 def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
-              log: Callable[[str], None] = print) -> dict:
-    """Run the full pipeline once; writes trace/renders/final_script/result.json into run_dir."""
+              log: Callable[[str], None] = print,
+              llm_factory: Callable[..., LLMClient] = LLMClient,
+              session_factory: Callable[[Path], BlenderSession] = BlenderSession,
+              resume: bool = False,
+              fork_from: tuple[str | Path, str] | None = None) -> dict:
+    """Run the full pipeline once; writes trace/renders/checkpoints/final_script/result.json into run_dir.
+
+    resume=True       continue an interrupted build in run_dir from its latest checkpoint (its saved config wins)
+    fork_from=(d, l)  start a NEW build in run_dir from checkpoint `l` of build `d`, possibly with another
+                      config, e.g. same round-0 build, different revision strategy (a cheaper, fairer ablation)
+    llm_factory(model, tracer, extra_body=...) and session_factory(log_path) default to the real classes;
+    tests inject scripted fakes to run the whole pipeline without network or Blender.
+    """
     run_dir = Path(run_dir)
-    tracer = Tracer(run_dir, run_id=run_dir.name)
-    t0 = time.perf_counter()
-    rounds_log: list[dict] = []
-    approved = False
-    open_issues: list[dict] = []
+    checkpoints = Checkpointer(run_dir)
+    state = checkpoints.load() if resume else None
+    if state is not None:
+        state = BuildState.from_dict(state)
+        log(f"--- resuming {run_dir.name} after checkpoint '{checkpoints.labels()[-1]}'")
+    elif fork_from is not None:
+        source, label = Path(fork_from[0]), fork_from[1]
+        saved = Checkpointer(source).load(label)
+        if saved is None:
+            raise ValueError(f"no checkpoint {label!r} in {source}; available: {Checkpointer(source).labels()}")
+        state = BuildState.from_dict(saved)
+        state.config, state.forked_from = asdict(cfg), f"{source}@{label}"
+        state.rounds_finished = state.approved or not state.current_script   # more rounds may be allowed now
+        checkpoints.save("fork", state.to_dict())
+        log(f"--- forked from {state.forked_from}")
+    else:
+        state = BuildState(prompt=prompt, config=asdict(cfg))
 
-    with BlenderSession(run_dir / "blender.log") as session:
-        skills = SkillLibrary(cfg.skills_dir) if cfg.skills_dir else None
-        skill_tools = SkillTools(skills) if skills is not None else None
-        blender = BlenderTools(session, run_dir / "renders",
-                               preamble_provider=skill_tools.preamble if skill_tools else None)
-        coder = make_coder(LLMClient(cfg.coder_model, tracer, extra_body=effort_body(cfg.coder_model, cfg.coder_effort)),
-                           blender, skill_tools=skill_tools, max_cost_usd=cfg.coder_max_cost_usd,
-                           compact_context=cfg.compact_context, edit_tools=cfg.edit_tools)
-        critic_llm = LLMClient(cfg.critic_model, tracer, extra_body=effort_body(cfg.critic_model, cfg.critic_effort))
-        verifier_llm = critic_llm  # same model by default; still a separate role with its own prompt
-        refine = refine_template(cfg)
+    tracer = Tracer(run_dir, run_id=run_dir.name, resume=resume)
+    with session_factory(run_dir / "blender.log") as session:
+        build = _Build(BuildConfig(**state.config), state, run_dir, tracer, session, checkpoints, log, llm_factory)
+        with tracer.span("run", "build", prompt=state.prompt, config=state.config,
+                         resumed=resume, forked_from=state.forked_from or None):
+            if state.completed_rounds < 0:
+                build.round0()
+            while not state.rounds_finished:
+                build.revise(state.completed_rounds + 1)
+        if state.learned is None:
+            build.learn()
+        return build.finalize()
 
-        with tracer.span("run", "build", prompt=prompt, config=asdict(cfg)):
-            # Round 0: build from the prompt, then an open-ended critique.
-            result = coder.run(prompt)
-            if blender.current_script:
-                renders = blender.render("round0", num_views=3)
-                verdict = critique(critic_llm, prompt, renders, blender.inspect_scene().content)
-                approved, open_issues = verdict.approved, verdict.issues
-                rounds_log.append({"round": 0, "coder_status": result.status, "coder_steps": result.steps,
-                                   "renders": renders, "critic_approved": verdict.approved,
-                                   "issues": open_issues, "critic_parse_error": verdict.parse_error})
-                log(f"--- round 0: coder={result.status} ({result.steps} steps) | critic: "
-                    f"{'APPROVED' if approved else str(len(open_issues)) + ' issues'}")
-                feedback = verdict.as_text()
 
-                # Revision rounds: Coder fixes, Verifier checks each issue (closed question).
-                for rnd in range(1, cfg.rounds + 1):
-                    if approved:
-                        break
-                    before_snapshot, before_renders = blender.snapshot(), renders
-                    result = coder.run(refine.format(request=prompt, script=blender.current_script, issues=feedback))  # {script} unused by the edit template
-                    renders = blender.render(f"round{rnd}", num_views=3)
-                    diff = diff_snapshots(before_snapshot, blender.snapshot())
-                    check = verify(verifier_llm, prompt, open_issues, before_renders, renders, diff)
-                    approved = check.passed
-                    rounds_log.append({"round": rnd, "coder_status": result.status, "coder_steps": result.steps,
-                                       "renders": renders, "diff": diff, "verified": check.passed,
-                                       "verdicts": check.issues, "regressions": check.regressions,
-                                       "verifier_skipped_llm": check.skipped_llm})
-                    log(f"--- round {rnd}: coder={result.status} ({result.steps} steps) | verifier: "
-                        f"{'PASSED' if check.passed else 'FAILED'}"
-                        f"{' (scene unchanged, no LLM call)' if check.skipped_llm else ''}")
-                    if not approved:
-                        # Next revision only hears what is still broken (fixed issues are dropped).
-                        feedback = check.unresolved_text(open_issues)
-                        open_issues = [open_issues[v["index"] - 1] for v in check.issues
-                                       if v.get("verdict") != "FIXED" and 0 < v.get("index", 0) <= len(open_issues)]
-                        open_issues += [{"problem": f"Regression: {r}", "fix": "Restore what was correct before."}
-                                        for r in check.regressions]
-                    else:
-                        open_issues = []
-            else:
-                rounds_log.append({"round": 0, "coder_status": result.status, "note": "no working script"})
-                log(f"--- round 0: coder={result.status}, no working script ({result.reason})")
+class _Build:
+    """The live side of one build: agents, tools and sandbox, plus one method per phase.
+    Each phase reads and updates `state` and ends with a checkpoint (a safe point)."""
 
-        learned = {"added": [], "rejected": [], "proposed": 0}
-        if approved and skills is not None and cfg.learn_skills:
-            # Self-evolution: turn this approved build into reusable skills (only verified code is admitted).
+    def __init__(self, cfg: BuildConfig, state: BuildState, run_dir: Path, tracer: Tracer, session,
+                 checkpoints: Checkpointer, log: Callable[[str], None], llm_factory) -> None:
+        self.cfg, self.state, self.run_dir, self.tracer, self.session = cfg, state, run_dir, tracer, session
+        self.checkpoints, self.log, self.llm_factory = checkpoints, log, llm_factory
+        self.t0 = time.perf_counter()
+        self.elapsed_before, self.restarts_before = state.elapsed_s, state.sandbox_restarts
+
+        self.skills = SkillLibrary(cfg.skills_dir) if cfg.skills_dir else None
+        self.skill_tools = SkillTools(self.skills) if self.skills is not None else None
+        self.blender = BlenderTools(session, run_dir / "renders",
+                                    preamble_provider=self.skill_tools.preamble if self.skill_tools else None)
+        # Restore the tool world from the state (no-ops for a fresh build).
+        self.blender.current_script = state.current_script
+        self.blender.history = state.exec_history
+        if self.skill_tools:
+            self.skill_tools.loaded = state.loaded_skills
+        self.coder = make_coder(llm_factory(cfg.coder_model, tracer, extra_body=effort_body(cfg.coder_model, cfg.coder_effort)),
+                                self.blender, skill_tools=self.skill_tools, max_cost_usd=cfg.coder_max_cost_usd,
+                                compact_context=cfg.compact_context, edit_tools=cfg.edit_tools)
+        self.critic_llm = llm_factory(cfg.critic_model, tracer, extra_body=effort_body(cfg.critic_model, cfg.critic_effort))
+        self.verifier_llm = self.critic_llm  # same model by default; still a separate role with its own prompt
+        self.refine = refine_template(cfg)
+
+    # ---------- phases ----------
+    def round0(self) -> None:
+        """Build from the prompt, then an open-ended critique."""
+        s, blender = self.state, self.blender
+        result = self.coder.run(s.prompt)
+        if blender.current_script:
+            renders = blender.render("round0", num_views=3)
+            verdict = critique(self.critic_llm, s.prompt, renders, blender.inspect_scene().content)
+            s.approved, s.open_issues, s.feedback, s.last_renders = verdict.approved, verdict.issues, verdict.as_text(), renders
+            s.rounds_log.append({"round": 0, "coder_status": result.status, "coder_steps": result.steps,
+                                 "renders": renders, "critic_approved": verdict.approved,
+                                 "issues": s.open_issues, "critic_parse_error": verdict.parse_error})
+            self.log(f"--- round 0: coder={result.status} ({result.steps} steps) | critic: "
+                     f"{'APPROVED' if s.approved else str(len(s.open_issues)) + ' issues'}")
+        else:
+            s.rounds_log.append({"round": 0, "coder_status": result.status, "note": "no working script"})
+            self.log(f"--- round 0: coder={result.status}, no working script ({result.reason})")
+        s.completed_rounds = 0
+        s.rounds_finished = s.approved or not blender.current_script or self.cfg.rounds < 1
+        self.save("round0")
+
+    def revise(self, rnd: int) -> None:
+        """Coder fixes the open issues, Verifier checks each one (closed question)."""
+        s, blender = self.state, self.blender
+        before_snapshot, before_renders = blender.snapshot(), s.last_renders
+        result = self.coder.run(self.refine.format(request=s.prompt, script=blender.current_script,
+                                                   issues=s.feedback))  # {script} unused by the edit template
+        renders = blender.render(f"round{rnd}", num_views=3)
+        diff = diff_snapshots(before_snapshot, blender.snapshot())
+        check = verify(self.verifier_llm, s.prompt, s.open_issues, before_renders, renders, diff)
+        s.approved, s.last_renders = check.passed, renders
+        s.rounds_log.append({"round": rnd, "coder_status": result.status, "coder_steps": result.steps,
+                             "renders": renders, "diff": diff, "verified": check.passed,
+                             "verdicts": check.issues, "regressions": check.regressions,
+                             "verifier_skipped_llm": check.skipped_llm})
+        self.log(f"--- round {rnd}: coder={result.status} ({result.steps} steps) | verifier: "
+                 f"{'PASSED' if check.passed else 'FAILED'}"
+                 f"{' (scene unchanged, no LLM call)' if check.skipped_llm else ''}")
+        if not s.approved:
+            # Next revision only hears what is still broken (fixed issues are dropped).
+            s.feedback = check.unresolved_text(s.open_issues)
+            s.open_issues = [s.open_issues[v["index"] - 1] for v in check.issues
+                             if v.get("verdict") != "FIXED" and 0 < v.get("index", 0) <= len(s.open_issues)]
+            s.open_issues += [{"problem": f"Regression: {r}", "fix": "Restore what was correct before."}
+                              for r in check.regressions]
+        else:
+            s.open_issues = []
+        s.completed_rounds = rnd
+        s.rounds_finished = s.approved or rnd >= self.cfg.rounds
+        self.save(f"round{rnd}")
+
+    def learn(self) -> None:
+        """Self-evolution: turn an approved build into reusable skills (only verified code is admitted)."""
+        s, cfg = self.state, self.cfg
+        s.learned = {"added": [], "rejected": [], "proposed": 0}
+        if s.approved and self.skills is not None and cfg.learn_skills:
             lib_model = cfg.librarian_model or cfg.coder_model
-            learned = learn_from_build(
-                LLMClient(lib_model, tracer, extra_body=effort_body(lib_model, cfg.coder_effort)), critic_llm,
-                prompt, blender.full_script(), skills, session, source_task=run_dir.name,
-                renders_dir=run_dir / "renders" / "skill_checks", log=log)
+            s.learned = learn_from_build(
+                self.llm_factory(lib_model, self.tracer, extra_body=effort_body(lib_model, cfg.coder_effort)),
+                self.critic_llm, s.prompt, self.blender.full_script(), self.skills, self.session,
+                source_task=self.run_dir.name, renders_dir=self.run_dir / "renders" / "skill_checks", log=self.log)
+            self.save("learned")
 
-        (run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
-        for name in (skill_tools.loaded if skill_tools and cfg.track_skill_usage else []):  # quality signal
-            skills.record_use(name, success=approved)
-        total = tracer.summary()
+    def finalize(self) -> dict:
+        s, blender, skills, skill_tools = self.state, self.blender, self.skills, self.skill_tools
+        (self.run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
+        for name in (skill_tools.loaded if skill_tools and self.cfg.track_skill_usage else []):  # quality signal
+            skills.record_use(name, success=s.approved)
+        total = self.tracer.summary()
         record = {
-            "prompt": prompt, "config": asdict(cfg), "approved": approved,
-            "status": "approved" if approved else ("no_script" if not blender.current_script else "not_approved"),
-            "rounds": rounds_log, "n_rounds": len(rounds_log), "open_issues": open_issues,
-            "wall_time_s": round(time.perf_counter() - t0, 1),
+            "prompt": s.prompt, "config": s.config, "approved": s.approved,
+            "status": "approved" if s.approved else ("no_script" if not blender.current_script else "not_approved"),
+            "rounds": s.rounds_log, "n_rounds": len(s.rounds_log), "open_issues": s.open_issues,
+            "wall_time_s": round(self._elapsed(), 1),
             "executions": len(blender.history),
             "failed_executions": sum(not h["ok"] for h in blender.history),
             "exec_errors": [h["error"].strip().splitlines()[0][:200] for h in blender.history
                             if not h["ok"] and h.get("error")],
-            "sandbox_restarts": session.restarts,
+            "sandbox_restarts": self.restarts_before + self.session.restarts,
             "skills_available": skills.names() if skills else [],
             "skills_loaded": list(skill_tools.loaded) if skill_tools else [],
-            "skills_learned": learned,
+            "skills_learned": s.learned,
+            "checkpoints": self.checkpoints.labels(),
+            "forked_from": s.forked_from or None,
             "llm_total": total["total"], "llm_per_agent": total["per_agent"],
         }
-        (run_dir / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    return record
+        (self.run_dir / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        return record
+
+    # ---------- checkpoint ----------
+    def save(self, label: str) -> None:
+        """A safe point: copy the tool world into the state and write it atomically."""
+        s = self.state
+        s.current_script = self.blender.current_script
+        s.exec_history = self.blender.history
+        s.loaded_skills = list(self.skill_tools.loaded) if self.skill_tools else []
+        s.elapsed_s = round(self._elapsed(), 1)
+        s.sandbox_restarts = self.restarts_before + self.session.restarts
+        self.checkpoints.save(label, s.to_dict())
+
+    def _elapsed(self) -> float:
+        return self.elapsed_before + time.perf_counter() - self.t0

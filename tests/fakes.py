@@ -53,8 +53,15 @@ class FakeSession:
     The Scene-Inspector is recognised by its output prefix and answered with those objects.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, log_path=None) -> None:
         self.executed: list[str] = []
+        self.restarts = 0
+
+    def __enter__(self) -> "FakeSession":    # used like BlenderSession: `with session_factory(log) as s:`
+        return self
+
+    def __exit__(self, *exc) -> None:
+        pass
 
     def execute(self, code: str, reset: bool = True, timeout_s: float | None = None) -> ExecResult:
         self.executed.append(code)
