@@ -14,3 +14,4 @@ runs/
 
 # personal notes (not published)
 docs/开发日志与面试笔记.md
+.pytest_cache/
