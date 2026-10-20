@@ -20,6 +20,7 @@ from blendharness.agents.verifier import verify
 from blendharness.core.llm import LLMClient
 from blendharness.core.session import Checkpointer
 from blendharness.core.tracing import Tracer
+from blendharness.memory.lessons import LessonLibrary
 from blendharness.memory.skills import SkillLibrary
 from blendharness.sandbox.session import BlenderSession
 from blendharness.tools.blender_tools import BlenderTools
@@ -58,6 +59,8 @@ class BuildConfig:
     learn_skills: bool = False                 # M4: after an approved build, extract + admit new skills
     librarian_model: str | None = None         # default: coder_model
     track_skill_usage: bool = True             # update stats.json (off = frozen library for a fair test)
+    lessons_dir: str | None = None             # RSI: lesson library folder (None = no lessons in the prompt)
+    track_lesson_usage: bool = False           # update lesson stats (off by default: A/B tests need a frozen library)
 
 
 def effort_body(model: str, effort: str) -> dict | None:
@@ -141,9 +144,16 @@ class _Build:
         self.blender.history = state.exec_history
         if self.skill_tools:
             self.skill_tools.loaded = state.loaded_skills
+        # Lessons are fixed per build: the ids chosen at the start are kept in the state, so a resumed build
+        # sees exactly the same lessons even if the library has changed since.
+        self.lessons = LessonLibrary(cfg.lessons_dir) if cfg.lessons_dir else None
+        if self.lessons is not None and state.completed_rounds < 0 and not state.lesson_ids:
+            state.lesson_ids = [x.id for x in self.lessons.all()]
+        lesson_text = "\n".join(f"- {x.text}" for x in (self.lessons.all() if self.lessons else [])
+                                if x.id in state.lesson_ids)
         self.coder = make_coder(llm_factory(cfg.coder_model, tracer, extra_body=effort_body(cfg.coder_model, cfg.coder_effort)),
                                 self.blender, skill_tools=self.skill_tools, max_cost_usd=cfg.coder_max_cost_usd,
-                                compact_context=cfg.compact_context, edit_tools=cfg.edit_tools)
+                                compact_context=cfg.compact_context, edit_tools=cfg.edit_tools, lessons=lesson_text)
         self.critic_llm = llm_factory(cfg.critic_model, tracer, extra_body=effort_body(cfg.critic_model, cfg.critic_effort))
         self.verifier_llm = self.critic_llm  # same model by default; still a separate role with its own prompt
         self.refine = refine_template(cfg)
@@ -216,6 +226,8 @@ class _Build:
         (self.run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
         for name in (skill_tools.loaded if skill_tools and self.cfg.track_skill_usage else []):  # quality signal
             skills.record_use(name, success=s.approved)
+        if self.lessons is not None and self.cfg.track_lesson_usage and s.lesson_ids:
+            self.lessons.record_use(s.lesson_ids, success=s.approved)
         total = self.tracer.summary()
         record = {
             "prompt": s.prompt, "config": s.config, "approved": s.approved,
@@ -230,6 +242,7 @@ class _Build:
             "skills_available": skills.names() if skills else [],
             "skills_loaded": list(skill_tools.loaded) if skill_tools else [],
             "skills_learned": s.learned,
+            "lessons_used": list(s.lesson_ids),
             "checkpoints": self.checkpoints.labels(),
             "forked_from": s.forked_from or None,
             "llm_total": total["total"], "llm_per_agent": total["per_agent"],
