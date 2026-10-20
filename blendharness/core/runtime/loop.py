@@ -1,17 +1,23 @@
 """The agent loop: the model decides, the harness executes.
 
     call model -> tool calls? -> run each tool -> feed results back -> call model again ...
-    until the model answers without a tool call, or a budget is exhausted.
+    until the model answers without a tool call, or a rail stops the run.
+
+The loop is pure mechanism: call the model, run tools, keep the history valid, report the outcome.
+Every policy ("is it really finished?", "is it stuck?", "too expensive?") lives in a rail
+(core/rails) that the loop consults at fixed events.
 
 Tool errors are NOT fatal: they are sent back to the model so it can fix them itself.
 The loop never decides what to do after failing; it stops and reports why (LoopResult),
 and the caller (orchestrator / eval runner / user session) chooses the fallback.
 """
 
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from blendharness.core.context_engine import ContextPolicy, size_chars
-from blendharness.core.llm import LLMClient, ToolCall
+from blendharness.core.llm import LLMClient, LLMResponse, ToolCall
+from blendharness.core.rails import CompletionCheck, CompletionRail, CostBudgetRail, Rail, StuckRail, TruncationRail
+from blendharness.core.rails.events import Decision, LoopContext, Nudge, Stop
 from blendharness.core.runtime.types import LoopResult
 from blendharness.core.tools import Tool, ToolResult
 
@@ -25,22 +31,26 @@ class AgentLoop:
         llm: LLMClient,
         system_prompt: str,
         tools: list[Tool],
-        max_steps: int = 20,
+        max_steps: int = 20,                   # hard limit of the loop itself
+        # Shortcuts for the standard rails (truncation and stuck are always on):
         max_same_error: int = 3,
         max_cost_usd: Optional[float] = None,
-        # messages -> None if really finished, else a reason the model is told before it continues
-        completion_check: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
+        completion_check: Optional[CompletionCheck] = None,
         context_policy: Optional[ContextPolicy] = None,  # full history -> what the model sees
+        rails: Optional[list[Rail]] = None,    # extra rails, added to the standard ones
     ) -> None:
-        self.completion_check = completion_check
-        self.context_policy = context_policy
         self.name = name
         self.llm = llm
         self.system_prompt = system_prompt
         self.tools = {t.name: t for t in tools}
         self.max_steps = max_steps
-        self.max_same_error = max_same_error
-        self.max_cost_usd = max_cost_usd
+        self.context_policy = context_policy
+        standard: list[Rail] = [TruncationRail(), StuckRail(max_same_error)]
+        if max_cost_usd is not None:
+            standard.append(CostBudgetRail(max_cost_usd))
+        if completion_check is not None:
+            standard.append(CompletionRail(completion_check))
+        self.rails = sorted(standard + list(rails or []), key=lambda r: r.priority)  # stable: ties keep order
 
     def run(self, task: str) -> LoopResult:
         messages: list[dict[str, Any]] = [
@@ -48,68 +58,66 @@ class AgentLoop:
             {"role": "user", "content": task},
         ]
         tool_schemas = [t.schema() for t in self.tools.values()]
-        error_counts: dict[str, int] = {}
-        cost = 0.0
-        truncations = 0
-        completion_nudges = 0
 
         with self.llm.tracer.span("agent", self.name, task=task[:300]) as span:
+            ctx = LoopContext(self.name, messages, span)
+            for rail in self.rails:
+                rail.before_run(ctx)
+
             for step in range(1, self.max_steps + 1):
+                ctx.step = step
                 # The model sees a compacted view; `messages` itself keeps the full history.
                 view = self.context_policy(messages) if self.context_policy else messages
                 if view is not messages:
                     span.set(**{f"context_step{step}": f"{size_chars(messages)} -> {size_chars(view)} chars"})
                 resp = self.llm.chat(view, tools=tool_schemas or None, agent=self.name)
-                cost += resp.cost_usd or 0.0
+                ctx.cost_usd += resp.cost_usd or 0.0
                 messages.append(resp.raw_message)  # the model's own turn, incl. its tool calls
 
-                if not resp.tool_calls and resp.finish_reason == "length":
-                    # Cut off by max_tokens (often by over-long thinking): NOT a final answer.
-                    truncations += 1
-                    if truncations >= 2:
-                        return self._finish(span, "truncated", resp.text, step, cost, messages,
-                                            reason="output hit max_tokens twice in a row")
-                    messages.append({"role": "user", "content":
-                                     "Your last response was cut off by the output length limit before you "
-                                     "acted. Stop deliberating and act now: call the appropriate tool."})
+                decision = self._ask("after_llm", ctx, resp)
+                if decision is None and not resp.tool_calls:
+                    decision = self._ask("on_final_answer", ctx, resp)
+                    if decision is None:
+                        return self._finish(ctx, "done", resp.text)
+                if decision is not None:
+                    self._skip(messages, resp.tool_calls)
+                    if isinstance(decision, Stop):
+                        return self._finish(ctx, decision.status, resp.text, decision.reason)
+                    messages.append({"role": "user", "content": decision.message})
                     continue
-                truncations = 0
-
-                if not resp.tool_calls:  # no tool requested: the model considers the task finished
-                    # Don't take "I'm done" on faith: verify the completion condition if one is defined.
-                    problem = self.completion_check(messages) if self.completion_check else None
-                    if problem and completion_nudges < 2:
-                        completion_nudges += 1
-                        span.set(**{f"completion_rejected_{completion_nudges}": problem})
-                        messages.append({"role": "user", "content": f"Not finished yet: {problem}"})
-                        continue
-                    status = "done" if not problem else "unverified"
-                    return self._finish(span, status, resp.text, step, cost, messages,
-                                        reason=problem or "")
 
                 for i, call in enumerate(resp.tool_calls):
                     result = self._execute(call)
                     # id and result come from the same `call` -> they can never be mismatched
                     messages.append({"role": "tool", "tool_call_id": call.id, "content": result.content})
+                    decision = self._ask("after_tool", ctx, call, result)
+                    if decision is not None:
+                        self._skip(messages, resp.tool_calls[i + 1:])
+                        break
+                decision = decision or self._ask("after_step", ctx)
+                if isinstance(decision, Stop):
+                    return self._finish(ctx, decision.status, resp.text, decision.reason)
+                if isinstance(decision, Nudge):
+                    messages.append({"role": "user", "content": decision.message})
 
-                    if result.is_error:
-                        signature = f"{call.name}: {result.content.strip().splitlines()[0][:200]}"
-                        error_counts[signature] = error_counts.get(signature, 0) + 1
-                        if error_counts[signature] >= self.max_same_error:
-                            # Every tool call must get a result, or the history becomes invalid
-                            # for anyone who continues it (the API rejects unanswered calls).
-                            for skipped in resp.tool_calls[i + 1:]:
-                                messages.append({"role": "tool", "tool_call_id": skipped.id,
-                                                 "content": "SKIPPED: agent stopped before running this call."})
-                            return self._finish(span, "stuck", resp.text, step, cost, messages,
-                                                reason=f"same error {self.max_same_error}x: {signature}")
+            return self._finish(ctx, "max_steps", "", f"no final answer after {self.max_steps} steps")
 
-                if self.max_cost_usd is not None and cost >= self.max_cost_usd:
-                    return self._finish(span, "over_budget", resp.text, step, cost, messages,
-                                        reason=f"spent ${cost:.4f} >= limit ${self.max_cost_usd}")
+    def _ask(self, event: str, ctx: LoopContext, *args) -> Decision:
+        """Consult the rails in priority order; the first decision wins."""
+        for rail in self.rails:
+            decision = getattr(rail, event)(ctx, *args)
+            if decision is not None:
+                ctx.span.set(**{f"rail_step{ctx.step}": f"{rail.name}.{event} -> {decision}"})
+                return decision
+        return None
 
-            return self._finish(span, "max_steps", "", self.max_steps, cost, messages,
-                                reason=f"no final answer after {self.max_steps} steps")
+    @staticmethod
+    def _skip(messages: list[dict[str, Any]], calls: list[ToolCall]) -> None:
+        """Every tool call must get a result, or the history becomes invalid for anyone who
+        continues it (the API rejects unanswered calls)."""
+        for call in calls:
+            messages.append({"role": "tool", "tool_call_id": call.id,
+                             "content": "SKIPPED: agent stopped before running this call."})
 
     def _execute(self, call: ToolCall) -> ToolResult:
         """Run one tool call. Every failure becomes an error message the model can read."""
@@ -133,6 +141,7 @@ class AgentLoop:
             span.set(is_error=result.is_error, output_preview=result.content[:300])
             return result
 
-    def _finish(self, span, status, text, steps, cost, messages, reason="") -> LoopResult:
-        span.set(status=status, steps=steps, cost_usd=round(cost, 6), reason=reason)
-        return LoopResult(status, text, steps, cost, reason, messages)
+    @staticmethod
+    def _finish(ctx: LoopContext, status: str, text: str, reason: str = "") -> LoopResult:
+        ctx.span.set(status=status, steps=ctx.step, cost_usd=round(ctx.cost_usd, 6), reason=reason)
+        return LoopResult(status, text, ctx.step, ctx.cost_usd, reason, ctx.messages)
