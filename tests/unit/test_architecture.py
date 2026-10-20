@@ -19,7 +19,8 @@ ALLOWED = {  # layer -> layers it may import from (besides itself)
     "memory": {"core"},
     "tools": {"core", "sandbox", "memory"},
     "agents": {"core", "sandbox", "memory", "tools"},
-    "workflow": {"core", "sandbox", "memory", "tools", "agents"},
+    "analysis": {"core"},                                   # reads traces; used by workflow and eval
+    "workflow": {"core", "sandbox", "memory", "tools", "agents", "analysis"},
     "protocol": {"core", "sandbox", "memory", "tools"},     # exposes tools, not agents
 }
 
