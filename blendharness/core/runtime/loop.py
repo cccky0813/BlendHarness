@@ -14,7 +14,7 @@ and the caller (orchestrator / eval runner / user session) chooses the fallback.
 
 from typing import Any, Optional
 
-from blendharness.core.context_engine import ContextPolicy, size_chars
+from blendharness.core.context_engine import ContextPolicy, estimate_tokens
 from blendharness.core.llm import LLMClient, ToolCall
 from blendharness.core.rails import CompletionCheck, CompletionRail, CostBudgetRail, Rail, StuckRail, TruncationRail
 from blendharness.core.rails.events import Decision, LoopContext, Nudge, Stop
@@ -66,8 +66,10 @@ class AgentLoop:
                 ctx.step = step
                 # The model sees a compacted view; `messages` itself keeps the full history.
                 view = self.context_policy(messages) if self.context_policy else messages
-                if view is not messages:
-                    span.set(**{f"context_step{step}": f"{size_chars(messages)} -> {size_chars(view)} chars"})
+                if view is not messages:  # a ContextEngine explains what each processor did
+                    report = getattr(self.context_policy, "last_report", "") or \
+                        f"{estimate_tokens(messages)} -> {estimate_tokens(view)} tok"
+                    span.set(**{f"context_step{step}": report})
                 resp = self.llm.chat(view, tools=tool_schemas or None, agent=self.name)
                 ctx.cost_usd += resp.cost_usd or 0.0
                 messages.append(resp.raw_message)  # the model's own turn, incl. its tool calls
