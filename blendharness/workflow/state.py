@@ -18,6 +18,7 @@ class BuildState:
     approved: bool = False
     current_script: str = ""                     # last script that ran OK
     loaded_skills: list[str] = field(default_factory=list)
+    lesson_ids: list[str] = field(default_factory=list)      # lessons in the Coder's prompt, fixed at the start
     exec_history: list[dict] = field(default_factory=list)   # every attempted script and its outcome
     open_issues: list[dict] = field(default_factory=list)    # what the next revision must fix
     feedback: str = ""                           # the text the next revision is told

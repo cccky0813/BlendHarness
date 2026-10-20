@@ -62,8 +62,11 @@ def make_coder_context(blender: BlenderTools, max_tokens: int = 100_000) -> Cont
 
 def make_coder(llm: LLMClient, blender: BlenderTools, skill_tools: SkillTools | None = None, max_steps: int = 15,
                max_cost_usd: float | None = 0.5, compact_context: bool = True,
-               edit_tools: bool = True) -> AgentLoop:
+               edit_tools: bool = True, lessons: str = "") -> AgentLoop:
     prompt = CODER_PROMPT
+    if lessons:  # learned from past failures (memory/lessons); empty -> the prompt is unchanged
+        prompt += ("\nLessons learned from past builds (follow them while writing the script, and check them "
+                   "with inspect_scene before you finish):\n" + lessons + "\n")
     index = skill_tools.index_text() if skill_tools else ""
     if index:  # progressive disclosure: only names + one-line descriptions sit in the context
         prompt += ("\nSkill library (verified reusable functions). If one fits a part of the request, call "

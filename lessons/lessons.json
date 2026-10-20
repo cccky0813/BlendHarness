@@ -1,0 +1,145 @@
+[
+ {
+  "id": "span_between_two_anchors",
+  "text": "When a part must run between two fixed anchors (a door and a well, two posts), read both anchor positions and set the part's location to their midpoint, its rotation about Z to the direction between them, and its length to that distance plus a small overlap at each end — do not let a diagonal bounding box imply a connection it doesn't make.",
+  "category": "placement",
+  "sources": [
+   "Create a small low-poly game scene on a 10 m x 10 m grass ground: a co",
+   "Create a wooden dining chair: four legs, a square seat, a backrest wit"
+  ],
+  "evidence": [
+   "The dirt path does not start at the cottage door. Its near end stops about 1 m inside the cottage, so the only visible part emerges around the cottage's right/rear corner (x≈0, y≈0), while the door si",
+   "The dirt path does not actually run from the cottage door to the well: it is a narrow diagonal strip centred on the world origin (3.39 x 4.77 m bbox, loc [0,0,0]), so its near end lands at roughly the",
+   "The top back rail is misaligned with the two back posts: it is not square between them — its right end overhangs past the right back post (clearest in orbit views 1 and 2), and it sits below the post "
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "even_symmetric_distribution",
+  "text": "Place repeated parts (slats, posts, bars) at coordinates computed as start + i*step from the support-to-support span, giving every copy identical dimensions and equal end gaps, and centre any symmetric assembly on the midpoint of the run it sits on.",
+  "category": "placement",
+  "sources": [
+   "Create a tall wooden bar stool: four long legs, a round seat about 75 ",
+   "Create a wooden dining chair: four legs, a square seat, a backrest wit"
+  ],
+  "evidence": [
+   "The three back slats are not evenly distributed along the rail — they bunch toward the middle/one side, with the center slat noticeably wider than the outer two, so the backrest does not read as three",
+   "The backrest leans forward/diagonally over the seat instead of standing upright, so it is not centered on the seat's rear edge and looks detached from the stool."
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "long_axis_matches_function",
+  "text": "Before sizing an elongated part, decide which world axis it must run along and put the largest dimension in that slot of the object's scale/dimensions: a handle lies parallel to the face it mounts on, a hinge pin runs perpendicular to the plane its joint folds in.",
+  "category": "placement",
+  "sources": [
+   "Create a desk lamp: a round weighted base, an adjustable arm made of t",
+   "Create a writing desk: a rectangular top, four legs, and a drawer unit"
+  ],
+  "evidence": [
+   "The handle bars are oriented wrong: each Handle_Bar is 0.14 long along the Y (depth) axis, so it points straight back into the drawer front instead of lying horizontally across it. In the front render",
+   "The elbow hinge is mis-oriented: Hinge_Elbow_Pin is elongated along Z (0.076 tall, 0.016 across) at (0.105, 0, 0.36), but Arm_Lower and Arm_Upper both hinge in the XZ plane, so the pivot axis points v"
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "child_position_from_parent_bbox",
+  "text": "Derive attached parts' coordinates from the bounding box of the part they sit on or in — put a base on the parent's top face at a computed offset from the cutout or rim, and keep a bulb coaxial with its shade by copying the shade's centre x/y and aligning its axis.",
+  "category": "placement",
+  "sources": [
+   "Create a desk lamp: a round weighted base, an adjustable arm made of t",
+   "Create a small kitchen corner: a floor and two walls meeting at a righ"
+  ],
+  "evidence": [
+   "Related faucet placement: because the sink sits on top of the counter, the faucet base is elevated with it and the faucet ends up at the front edge of the counter run rather than at the back of the ba",
+   "Glowing_Bulb also shifted laterally (x 0.3819 -> 0.4047), so it is no longer coaxial with Lamp_Shade and risks poking through/intersecting the shade wall.",
+   "Bulb drifted further off the shade axis and lower (x 0.4047->0.4138, z 0.1973->0.1762), now sitting below the shade's closed bottom while still invisible - worsened from before"
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "fix_transform_not_dimensions",
+  "text": "Fix a misplaced or misaligned part by editing its location and rotation values; changing only its dimensions reshapes the bounding box about the same centre and leaves the part where it was, so confirm in inspect_scene that the offending object's location/rotation actually changed.",
+  "category": "placement",
+  "sources": [
+   "Create a small kitchen corner: a floor and two walls meeting at a righ",
+   "Create a tall wooden bar stool: four long legs, a round seat about 75 ",
+   "Create a wooden dining chair: four legs, a square seat, a backrest wit"
+  ],
+  "evidence": [
+   "The top back rail is misaligned with the two back posts: it is not square between them — its right end overhangs past the right back post (clearest in orbit views 1 and 2), and it sits below the post ",
+   "Related faucet placement: because the sink sits on top of the counter, the faucet base is elevated with it and the faucet ends up at the front edge of the counter run rather than at the back of the ba",
+   "The backrest leans forward/diagonally over the seat instead of standing upright, so it is not centered on the seat's rear edge and looks detached from the stool."
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "derive_child_size_from_parent_bbox",
+  "text": "Size every new part from the bounding box of the part it covers or mounts on: a roof's base footprint equals the wall footprint plus a small eave overhang and its base z equals the wall top z, and a head/shade diameter stays within the scale of the base and arm it hangs from. Never choose a part's dimensions independently of its host.",
+  "category": "proportion",
+  "sources": [
+   "Create a desk lamp: a round weighted base, an adjustable arm made of t",
+   "Create a small low-poly game scene on a 10 m x 10 m grass ground: a co"
+  ],
+  "evidence": [
+   "The cottage roof is massively out of scale with the walls: Cottage_Roof is 6.22 x 6.22 m over a 2.0 x 1.5 m wall box, so it overhangs roughly 2 m on every side and its base (z = 2.0) floats 0.5 m abov",
+   "The dirt path is a single ~2.9 m wide wedge-shaped quad (size 4.84 x 2.92) - almost as wide as the well drum - so it reads as a broad slab rather than a garden path, and its wide end flares open at th",
+   "The cottage body is far too small for everything placed on it: the wall block is only 1x1x1 (base floating ~0.3 m above the grass) while the roof is 2.8x2.2, so the two windows at x=-2.99 and x=-0.61 ",
+   "Lamp_Shade enlarged from 0.16x0.16x0.11 to 0.2x0.2x0.13 while keeping the same closed drum form, making the head oversized relative to the arm/base"
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "couple_support_and_supported_heights",
+  "text": "Compute a support run and the thing it carries from one shared value: rails must span the same start and end as the post row they pass through, and a canopy's location z must equal the post height, so editing one member forces a matching edit of the other.",
+  "category": "proportion",
+  "sources": [
+   "Create a small low-poly game scene on a 10 m x 10 m grass ground: a co",
+   "Create a small low-poly village on a 14 m x 14 m grass ground: two cot"
+  ],
+  "evidence": [
+   "Fence is inconsistent: the two rails span only y -2.5..2.5 while the posts run from y = -4 to y = 6, so Fence_Post_6 (y = 6) and Fence_Post_5 (y = 4) stand with no rails touching them and Post_6 is of",
+   "Well_Post_0/1 cut from 1.16 m to 0.36 m while Well_Roof dropped to z=0, so the well's canopy now rests directly on the stone ring and the posts are no longer visible supports - the raised roof-on-post"
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "fit_panels_to_clear_interior",
+  "text": "Derive panels that fit inside or onto a carcass from its clear interior dimensions (outer size minus both wall/back thicknesses) and keep applied surface panels a small fraction of their width in thickness, so no face is coplanar with an outer face and no panel reads as a solid block.",
+  "category": "proportion",
+  "sources": [
+   "Create a bedside nightstand: a rectangular cabinet on four short legs ",
+   "Create a small low-poly village on a 14 m x 14 m grass ground: two cot"
+  ],
+  "evidence": [
+   "CottageB_Door and the four CottageB window meshes are thick blocks, not panels: door size [0.72, 0.62, 1.7] and windows [0.53, 0.46, 0.6], so they protrude ~0.2-0.3 m out of the ochre walls as boxes (",
+   "Bottom_Panel and Shelf_Divider are 0.5 wide and 0.4 deep, exactly the outer size of the carcass, so their end/edge faces are coplanar with the outer faces of Side_Left/Side_Right and with the back pan"
+  ],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "verify_every_named_object_changed",
+  "text": "After a revision, confirm in inspect_scene that each object named in the problem has a changed dimension or location in the diff and that the number actually reached the target value; a missing diff entry or a value that barely moved means the defect is still present.",
+  "category": "proportion",
+  "sources": [
+   "Create a desk lamp: a round weighted base, an adjustable arm made of t",
+   "Create a small low-poly village on a 14 m x 14 m grass ground: two cot",
+   "Create a tall wooden bar stool: four long legs, a round seat about 75 "
+  ],
+  "evidence": [
+   "Bulb_Socket became a long thin 0.087-tall stub (was 0.023), visibly protruding where before it was compact and hidden.",
+   "CottageB_Door and the four CottageB window meshes are thick blocks, not panels: door size [0.72, 0.62, 1.7] and windows [0.53, 0.46, 0.6], so they protrude ~0.2-0.3 m out of the ochre walls as boxes (",
+   "The two backrest uprights are far too long: they pass through/over the seat disc and their lower ends stick out well beyond the seat's front edge (clearly visible in the top-down view, where the posts"
+  ],
+  "uses": 0,
+  "successes": 0
+ }
+]
