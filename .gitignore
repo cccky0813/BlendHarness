@@ -16,3 +16,4 @@ runs/
 docs/开发日志与面试笔记.md
 .pytest_cache/
 *.egg-info/
+docs/RSI之旅与架构笔记.md
