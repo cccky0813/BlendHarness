@@ -1,7 +1,8 @@
 """Coder agent = role prompt + Blender tools + a model, run by the generic AgentLoop."""
 
 from blendharness.agents.prompts import load_prompt
-from blendharness.core.context_engine import omit_large_tool_args, omit_stale_code_blocks, pin_at_end, tool_result_for
+from blendharness.core.context_engine import (BudgetGuard, ContextEngine, OmitLargeToolArgs, OmitStaleCodeBlocks,
+                                              Pin, tool_result_for)
 from blendharness.core.llm import LLMClient
 from blendharness.core.runtime import AgentLoop
 from blendharness.tools.blender_tools import BlenderTools
@@ -28,32 +29,35 @@ def _is_ok_run(m: dict) -> bool:
     return m.get("role") == "tool" and content.startswith("OK:") and "script ran" in content
 
 
-def _failed(messages: list[dict], call: dict) -> bool:
-    return tool_result_for(messages, call["id"]).startswith("ERROR")
+def _latest_failed_script(messages: list[dict]) -> str | None:
+    """Id of the latest large script call, if that call failed (the model still has to fix it)."""
+    latest = None
+    for m in messages:
+        for tc in m.get("tool_calls") or []:
+            if len(tc["function"].get("arguments") or "") >= 1500:
+                latest = tc["id"] if tool_result_for(messages, tc["id"]).startswith("ERROR") else None
+    return latest
 
 
-def make_coder_context(blender: BlenderTools):
-    """Context policy (M3 v2):
-    - every script copy in the history becomes a placeholder, except the latest FAILED one (to be fixed);
-    - code blocks in the task become placeholders once a working script exists;
-    - the up-to-date working script is pinned at the END of the view, so the model always sees exactly
-      one current version (no view_script round trips, no stale duplicates).
+PIN_HEADER = ("CURRENT WORKING SCRIPT (always up to date; this is the text edit_script edits; "
+              "loaded skills are prepended automatically when it runs):\n")
+
+
+def make_coder_context(blender: BlenderTools, max_tokens: int = 100_000) -> ContextEngine:
+    """Context pipeline (M3 v2):
+    1. every script copy in the history becomes a placeholder, except the latest FAILED one (to be fixed);
+    2. once a working script exists, code blocks in the task become placeholders too;
+    3. the up-to-date working script is pinned at the END of the view, so the model always sees exactly
+       one current version (no view_script round trips, no stale duplicates);
+    4. a budget guard as the last line of defense (557 past calls: median 5.7k, max 23k tokens; should never fire).
     Lesson from eval m3_vs_baseline: hiding the script being edited made the model re-read it 17 times.
     """
-    def policy(messages: list[dict]) -> list[dict]:
-        latest_failed = None
-        for m in messages:
-            for tc in m.get("tool_calls") or []:
-                if len(tc["function"].get("arguments") or "") >= 1500:
-                    latest_failed = tc["id"] if _failed(messages, tc) else None
-        view = omit_large_tool_args(messages, keep_last=0, keep=lambda msgs, tc: tc["id"] == latest_failed)
-        if not blender.current_script:
-            return view
-        view = omit_stale_code_blocks(view, lambda msgs, i: True)
-        return pin_at_end(view, "CURRENT WORKING SCRIPT (always up to date; this is the text edit_script edits; "
-                                "loaded skills are prepended automatically when it runs):\n"
-                                f"```python\n{blender.current_script}\n```")
-    return policy
+    return ContextEngine([
+        OmitLargeToolArgs(keep_last=0, keep=lambda msgs, tc: tc["id"] == _latest_failed_script(msgs)),
+        OmitStaleCodeBlocks(lambda msgs, i: bool(blender.current_script)),
+        Pin(lambda: f"{PIN_HEADER}```python\n{blender.current_script}\n```" if blender.current_script else None),
+        BudgetGuard(max_tokens),
+    ])
 
 
 def make_coder(llm: LLMClient, blender: BlenderTools, skill_tools: SkillTools | None = None, max_steps: int = 15,

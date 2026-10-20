@@ -5,6 +5,7 @@ import json
 import re
 from typing import Callable
 
+from blendharness.core.context_engine.processors.base import Processor
 from blendharness.core.context_engine.types import Messages
 
 
@@ -58,3 +59,25 @@ def omit_stale_code_blocks(messages: Messages, is_superseded: Callable[[Messages
             m["content"],
         )
     return out
+
+
+# ---------- as pipeline steps ----------
+class OmitLargeToolArgs(Processor):
+    """Older copies of large tool arguments (e.g. full scripts) become placeholders."""
+
+    def __init__(self, keep_last: int = 1, min_chars: int = 1500,
+                 keep: Callable[[Messages, dict], bool] | None = None) -> None:
+        self.keep_last, self.min_chars, self.keep = keep_last, min_chars, keep
+
+    def __call__(self, messages: Messages) -> Messages:
+        return omit_large_tool_args(messages, self.keep_last, self.min_chars, self.keep)
+
+
+class OmitStaleCodeBlocks(Processor):
+    """Large ```python blocks in user messages become placeholders once superseded."""
+
+    def __init__(self, is_superseded: Callable[[Messages, int], bool], min_chars: int = 1500) -> None:
+        self.is_superseded, self.min_chars = is_superseded, min_chars
+
+    def __call__(self, messages: Messages) -> Messages:
+        return omit_stale_code_blocks(messages, self.is_superseded, self.min_chars)

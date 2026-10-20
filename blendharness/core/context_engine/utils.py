@@ -1,5 +1,6 @@
 """Read-only helpers over a message history (lookups and size measurement)."""
 
+from blendharness.core.context_engine.token import message_chars
 from blendharness.core.context_engine.types import Messages
 
 
@@ -12,10 +13,5 @@ def tool_result_for(messages: Messages, call_id: str) -> str:
 
 
 def size_chars(messages: Messages) -> int:
-    """Rough context size (characters of text) for tracing the effect of compaction."""
-    total = 0
-    for m in messages:
-        c = m.get("content")
-        total += len(c) if isinstance(c, str) else sum(len(p.get("text", "")) for p in c or [] if isinstance(p, dict))
-        total += sum(len(tc["function"].get("arguments") or "") for tc in m.get("tool_calls") or [])
-    return total
+    """Characters of text (incl. tool-call arguments) in a message list."""
+    return sum(message_chars(m)[0] for m in messages)
