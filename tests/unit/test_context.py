@@ -5,8 +5,8 @@ In P4 these become processors in a context engine; for the same input they must 
 
 import json
 
-from agents.coder import executed_successfully, make_coder_context
-from harness.context import omit_large_tool_args, omit_stale_code_blocks, pin_at_end, size_chars, tool_result_for
+from blendharness.agents.coder import executed_successfully, make_coder_context
+from blendharness.core.context_engine import omit_large_tool_args, omit_stale_code_blocks, pin_at_end, size_chars, tool_result_for
 
 BIG = "x = 1\n" * 400          # ~2400 chars, above the 1500-char threshold
 

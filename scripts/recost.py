@@ -9,9 +9,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harness.llm import load_prices  # noqa: E402
+from blendharness.core.llm import load_prices
 
 prices = load_prices()
 for run_dir in sys.argv[1:]:

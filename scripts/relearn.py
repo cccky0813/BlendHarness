@@ -9,18 +9,16 @@ Usage: python scripts/relearn.py --exp skills_lc --task-file eval/tasks_skills.j
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+from blendharness.core.llm import LLMClient
+from blendharness.core.tracing import Tracer
+from blendharness.memory.skills import SkillLibrary
+from blendharness.sandbox.session import BlenderSession
+from blendharness.workflow.build import BuildConfig, effort_body
+from blendharness.workflow.learning import learn_from_build
 
-from harness.llm import LLMClient  # noqa: E402
-from harness.tracing import Tracer  # noqa: E402
-from memory.learning import learn_from_build  # noqa: E402
-from memory.skill_library import SkillLibrary  # noqa: E402
-from pipeline.build import BuildConfig, effort_body  # noqa: E402
-from tools.blender_session import BlenderSession  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--exp", required=True)

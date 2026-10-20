@@ -6,17 +6,15 @@ Outputs (runs/<run_id>/): trace.jsonl, payloads/, final_script.py, renders/*.png
 
 import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agents.coder import make_coder  # noqa: E402
-from harness.llm import LLMClient  # noqa: E402
-from harness.tracing import Tracer  # noqa: E402
-from tools.blender_session import BlenderSession  # noqa: E402
-from tools.blender_tools import BlenderTools  # noqa: E402
+from blendharness.agents.coder import make_coder
+from blendharness.core.llm import LLMClient
+from blendharness.core.tracing import Tracer
+from blendharness.sandbox.session import BlenderSession
+from blendharness.tools.blender_tools import BlenderTools
 
 DEFAULT_PROMPT = (
     "Create a realistic ceramic coffee mug: cylindrical body with a hollow open top and visible wall "

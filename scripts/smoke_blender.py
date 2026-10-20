@@ -1,16 +1,14 @@
-"""Smoke test for the Blender sandbox (tools/blender_session.py). No LLM involved.
+"""Smoke test for the Blender sandbox (blendharness/sandbox/session.py). No LLM involved.
 
 Checks: startup time, normal exec, error reporting, scene reset vs. keep,
 watchdog on an infinite loop, crash recovery, and one real render.
 """
 
-import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tools.blender_session import BlenderSession  # noqa: E402
+from blendharness.sandbox.session import BlenderSession
 
 RUN = Path("runs/smoke_blender")
 COUNT = "import bpy\nprint('objects:', len(bpy.data.objects))"

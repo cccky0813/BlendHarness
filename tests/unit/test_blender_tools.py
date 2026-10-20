@@ -5,7 +5,8 @@ FakeSession conventions (tests/fakes.py): `make_mesh("Name")` creates a mesh, a 
 
 import pytest
 
-from tools.blender_tools import BlenderTools, diff_snapshots
+from blendharness.tools.blender_tools import BlenderTools
+from blendharness.tools.scene import diff_snapshots
 
 CHAIR = 'make_mesh("Seat")\nmake_mesh("Leg")\nwidth = 0.5\n'
 

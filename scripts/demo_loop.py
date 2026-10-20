@@ -1,4 +1,4 @@
-"""Demo of harness/loop.py with fake tools (no Blender yet).
+"""Demo of the agent loop (blendharness/core/runtime) with fake tools (no Blender yet).
 
 Scenario 1: normal multi-step tool use -> status "done".
 Scenario 2: a tool that always fails with the same error -> status "stuck".
@@ -9,11 +9,11 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harness.llm import LLMClient  # noqa: E402
-from harness.loop import AgentLoop, Tool, ToolResult  # noqa: E402
-from harness.tracing import Tracer  # noqa: E402
+from blendharness.core.llm import LLMClient
+from blendharness.core.runtime import AgentLoop
+from blendharness.core.tools import Tool, ToolResult
+from blendharness.core.tracing import Tracer
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "deepseek-flash"
 

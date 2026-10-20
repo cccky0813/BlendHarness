@@ -6,9 +6,9 @@ replay a fixed script of replies, and instead of Blender we fake just enough of 
 
 import json
 
-from harness.llm import LLMResponse, ToolCall
-from harness.tracing import Tracer
-from tools.blender_session import ExecResult
+from blendharness.core.llm import LLMResponse, ToolCall
+from blendharness.core.tracing import Tracer
+from blendharness.sandbox.session import ExecResult
 
 
 # ---------- scripted LLM ----------
