@@ -14,6 +14,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+mcp = ["mcp>=2.3,<3"]
+
+[project.scripts]
+blendharness-mcp = "blendharness.protocol.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["blendharness*"]

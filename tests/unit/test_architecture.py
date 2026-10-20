@@ -1,6 +1,7 @@
 """The layering rule, enforced: each layer may only import from itself and the layers below it.
 
     core  <-  sandbox, memory  <-  tools  <-  agents  <-  workflow
+                                     tools  <-  protocol (MCP server)
 
 A diagram in the README can silently go out of date; this test cannot.
 """
@@ -19,6 +20,7 @@ ALLOWED = {  # layer -> layers it may import from (besides itself)
     "tools": {"core", "sandbox", "memory"},
     "agents": {"core", "sandbox", "memory", "tools"},
     "workflow": {"core", "sandbox", "memory", "tools", "agents"},
+    "protocol": {"core", "sandbox", "memory", "tools"},     # exposes tools, not agents
 }
 
 

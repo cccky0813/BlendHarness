@@ -4,7 +4,7 @@ Execution follows the error-as-observation rule: an unknown tool, invalid argume
 never crash the agent; they become an error message the model can read and react to.
 """
 
-from typing import Iterable, Optional
+from typing import Iterable, Iterator, Optional
 
 from blendharness.core.llm import ToolCall
 from blendharness.core.tools.base import PERMISSIONS, Tool, ToolResult
@@ -29,6 +29,9 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return list(self._tools)
+
+    def __iter__(self) -> Iterator[Tool]:
+        return iter(list(self._tools.values()))
 
     def __len__(self) -> int:
         return len(self._tools)
