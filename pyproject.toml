@@ -1,0 +1,20 @@
+[project]
+name = "blendharness"
+version = "0.1.0"
+description = "A self-evolving multi-agent harness for Blender, built on an agent harness written from scratch."
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=3.31",
+    "python-dotenv>=1.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+markers = [
+    "blender: needs a real headless Blender (skipped when BLENDER_PATH / the default app is missing)",
+]
