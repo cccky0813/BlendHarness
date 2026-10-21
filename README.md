@@ -20,14 +20,16 @@ The original idea comes from the [LL3M paper](https://arxiv.org/abs/2508.08228).
 - **Two-step visual review.** The **Critic** answers an open question ("what is wrong?") and the **Verifier** a closed one ("was each issue fixed, and did anything regress?"). Cheap programmatic checks always run before vision models.
 - **Self-evolving skill library.** A librarian distills approved builds into reusable functions, admitted only through four gates (static, dedup, sandbox, structure plus vision) with one repair round. Skills are listed in the prompt and loaded on demand.
 - **Tracing and evaluation.** Every LLM call, tool call and agent run is a span with tokens, cost and latency. A resumable, crash-isolated eval runner interleaves variants for fair comparison.
-- **Tested.** 180 tests in about 6 s: unit tests on a scripted fake LLM and fake Blender, layering rules, and integration tests on a real Blender.
+- **Trace-based evaluation and gated self-evolution.** Every past build is rebuilt from its trace into process metrics and a root-cause failure taxonomy. A Reflector turns failure cases into lessons (semantic memory), which are only adopted if a pre-registered A/B test on unseen tasks, with a placebo control, shows they help. So far they did not, and the gate kept them out (see Results).
+- **Tested.** 201 tests in about 6 s: unit tests on a scripted fake LLM and fake Blender, layering rules, and integration tests on a real Blender.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
     subgraph EVAL[eval/]
-        RUN[run_eval.py: tasks x variants x repeats] --> REP[report.py]
+        RUN[run_eval.py: tasks x variants x repeats] --> REP[report.py / compare.py]
+        AN[analyze.py] --> ANL[analysis/: trajectories, metrics, failure taxonomy]
     end
     subgraph WF[workflow/]
         C0[Coder builds] --> CR[Critic reviews renders]
@@ -46,7 +48,7 @@ flowchart TB
     subgraph TL[tools/ + memory/ + sandbox/]
         BT[BlenderTools: execute / edit / view / inspect / render]
         ST[SkillTools: index / load_skill]
-        MEM[memory/skills: SkillLibrary]
+        MEM[memory/: skills + lessons]
         SB[sandbox: guard + session <-> server in Blender]
     end
     subgraph CORE[core/]
@@ -72,13 +74,14 @@ flowchart TB
 |---|---|---|
 | Core | `core/` | Generic mechanism, nothing Blender-specific: `runtime` (agent loop), `rails`, `context_engine`, `tools` (Tool, ToolRegistry), `llm`, `session` (checkpoints), `tracing` |
 | Sandbox | `sandbox/` | `server.py` runs **inside** Blender, `session.py` drives it with a watchdog, `guard.py` checks code statically |
-| Memory | `memory/skills/` | `SkillLibrary`: one folder per skill (`SKILL.md` + `skill.py` + `stats.json`) |
+| Memory | `memory/` | `skills/`: `SkillLibrary`, one folder per skill (`SKILL.md` + `skill.py` + `stats.json`); `lessons/`: `LessonLibrary`, rules learned from failures |
+| Analysis | `analysis/` | Rebuild builds from `trace.jsonl` + `result.json` (coder runs, tool calls, the life of each issue across rounds), process metrics, root-cause failure taxonomy |
 | Tools | `tools/` | `BlenderTools` (script state, execute / edit / view / inspect), `scene.py`, `render.py`, `SkillTools` |
 | Agents | `agents/` | Configurations: Coder (prompt + tools + context pipeline + completion check), Critic, Verifier, Librarian; prompts in `prompts/*.md` |
-| Workflow | `workflow/` | `run_build`: build / critique / revise / verify / learn as checkpointed phases; `learning/`: admission gates and the learning loop |
+| Workflow | `workflow/` | `run_build`: build / critique / revise / verify / learn as checkpointed phases; `learning/`: skill admission gates and learning loop, lesson gates |
 | Protocol | `protocol/` | `blendharness-mcp`: the tools as an MCP server |
 
-Layering is one-way (`core` ← `sandbox`, `memory` ← `tools` ← `agents` ← `workflow`; `protocol` uses `tools`) and enforced by `tests/unit/test_architecture.py`. See [`docs/architecture.md`](docs/architecture.md).
+Layering is one-way (`core` ← `sandbox`, `memory` ← `tools` ← `agents` ← `workflow`; `analysis` uses only `core`; `protocol` uses `tools`) and enforced by `tests/unit/test_architecture.py`. See [`docs/architecture.md`](docs/architecture.md).
 
 Design principles: **mechanism vs. policy** (the loop runs, rails decide), **framework vs. configuration** (one loop, agents are configs), **dependency inversion** (`BlenderTools` only knows a generic `preamble_provider`, not skills), **cheap before expensive** (deterministic checks before vision models), and **fail-safe** (critics and gates reject when in doubt).
 
@@ -91,6 +94,19 @@ All numbers come from the eval harness and were measured before the October 2026
 | `m3_vs_baseline` | 6 tasks x 2 repeats, full rewrites + full history vs. edit tool + compaction (v1) | Same pass rate (75%) and −13% cost per task. **Revision rounds got more expensive** (median $0.446 vs $0.274): compaction hid the script being edited (17 re-reads), and many small edits meant many round trips. A single-run "−73%" did not replicate. |
 | `m3v2` | Pinned current script + batched all-or-nothing edits, 3 hardest tasks x 2 | **6/6 passed** (baseline 4/6), **−14% cost per task**, 0 re-reads. 85–92% of revision output tokens are hidden thinking, so the remaining cost lever is reasoning control, not context. |
 | `skills_lc` | Learning curve: train on 5 tasks, then test on 5 unseen tasks that share components, with vs. without the library | Library grew to 10 verified skills (the repair round rescued 8 rejected candidates). Test pass rate was 6/10 with skills vs 8/10 without, **but all 4 failures were unrelated to skills**. Only **4/10 runs adopted a skill**. Where skills were used (village), 2/2 passed in the first round at −34% cost. Bottleneck: coarse, whole-object skills transfer poorly. |
+
+### Self-evolution from failures, gated by evaluation (October 2026)
+
+| Step | Setup | Finding |
+|---|---|---|
+| Trajectory analysis | 69 past builds, 79 Critic issues labelled by root cause | Spatial problems are **72%** of all issues. Contact problems (floating, interpenetration) are fixed 73–85% of the time by the Critic → Coder → Verifier loop; **relational** ones (placement, proportion) only **43–45%**, and they are the largest share of problems left in failed builds. Code errors are not the bottleneck: 9% of executions fail and 89% recover within the same run. |
+| Lessons | A Reflector reads the 23 relational cases (problem, suggested fix, verifier evidence) | 9 lessons, e.g. "derive a part's position from the bounding box of the part it rests on", "fix placement through location/rotation, not dimensions". Gates: generality (cited cases from ≥ 2 tasks, checked by us), dedup. |
+| `lessons_ab` | 8 unseen tasks avoiding training objects, with vs. without lessons, x 2 | Pre-registered primary metric (relational issues in round 0): no result, **floor effect** (2 vs 1 such issues in 16 builds each). Exploratory: −24% cost, −20% coder steps. |
+| `lessons_confirm` | Pre-registered confirmation: with / without / **placebo** (generic advice of the same length) x 2 | **The cost effect did not replicate** (with − without: −$0.007, 95% CI [−0.12, +0.11]). The control arm's cost moved 34% between nights, more than the effect being measured. The lessons are therefore **not enabled by default**: the evaluation gate rejected this evolution step. |
+
+Takeaways: an exploratory win needs a pre-registered confirmation and a placebo arm (the second time in this project a single-experiment effect failed to replicate); the test distribution must contain the failures being targeted (relational errors cluster in multi-object scenes, which motivates a dedicated spatial-layout project); and the API relay itself is an experimental variable (it silently blocked some prompts, and the blocking changed over time).
+
+### Skill library
 
 The skill library learned in `skills_lc` is in [`skills/`](skills/):
 
@@ -129,6 +145,12 @@ python scripts/run_build.py --fork-from runs/<run_id> --at round0 --rounds 3
 # Evaluate
 python eval/run_eval.py --exp my_exp --variants baseline m3 --repeats 2 --workers 3
 python eval/report.py --exp my_exp
+python eval/compare.py --exp my_exp --a baseline --b m3        # paired A/B with bootstrap CIs
+
+# Trace analysis and self-evolution from failures
+python eval/analyze.py                  # metrics + failure taxonomy over all past builds -> runs/analysis/
+python scripts/reflect.py --dry-run     # the failure cases the Reflector would read
+python scripts/reflect.py               # distil lessons into lessons/ (use with BuildConfig(lessons_dir=...))
 
 # Tests (no API calls; the integration tests are skipped without Blender)
 python -m pytest
@@ -145,15 +167,17 @@ Each run writes `runs/<run_id>/`, which contains `trace.jsonl` (span summaries),
 blendharness/
   core/        runtime/  rails/  context_engine/  tools/  llm/  session/  tracing/
   sandbox/     server.py  session.py  guard.py
-  memory/      skills/library.py
+  memory/      skills/library.py  lessons/library.py
+  analysis/    trajectory.py  metrics.py  taxonomy.py
   tools/       blender_tools.py  scene.py  render.py  skill_tools.py
-  agents/      coder.py  critic.py  verifier.py  librarian.py  prompts/*.md
-  workflow/    build.py  state.py  learning/admission.py  learning/learn.py
+  agents/      coder.py  critic.py  verifier.py  librarian.py  reflector.py  prompts/*.md
+  workflow/    build.py  state.py  learning/admission.py  learning/learn.py  learning/lessons.py
   protocol/    mcp_server.py
-eval/          run_eval.py  report.py  tasks.json  tasks_skills.json
-scripts/       run_build.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
+eval/          run_eval.py  report.py  compare.py  analyze.py  tasks*.json  placebo_lessons/
+scripts/       run_build.py  reflect.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
 tests/         unit/  integration/  fakes.py
 skills/        learned skill library
+lessons/       learned lessons (not enabled by default: they did not pass the A/B gate)
 config/        prices.json
 docs/          architecture.md  mcp.md  roadmap.md  images
 ```
@@ -161,6 +185,7 @@ docs/          architecture.md  mcp.md  roadmap.md  images
 ## Limitations and roadmap
 
 - **Small samples.** There are two repeats per condition, and the variance between identical runs is large. Key experiments should be repeated 3–5 times.
+- **Lessons not confirmed.** Neither the targeted relational errors nor the cost were measurably reduced on single-object test tasks; the targeted errors are rare there. A fair test needs multi-object scenes, where relational errors actually occur.
 - **Skill adoption.** Skills are too coarse to transfer. Next: distil composable parts (leg sets, drawer stacks, handles, roofs) and have the harness retrieve and recommend the top-k skills per request.
 - **Cost.** Most revision cost is hidden reasoning. Next: stage-based model routing (cheaper models or lower effort for revisions) and a failure-driven cascade, compared against all-cheap and all-strong.
 - **Sandbox scope.** Process isolation plus a static guard catches the realistic cases, but static checks can be obfuscated around; a public service would need containers.
