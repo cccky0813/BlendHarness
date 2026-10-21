@@ -5,6 +5,7 @@ BlendHarness is one package, `blendharness/`, in layers that only depend downwar
 ```
 core  <-  sandbox, memory  <-  tools  <-  agents  <-  workflow
                                  tools  <-  protocol
+core  <-  analysis  <-  workflow, eval
 ```
 
 `core/` is a generic agent harness and knows nothing about Blender. The rule is enforced by
