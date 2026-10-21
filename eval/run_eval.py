@@ -39,9 +39,11 @@ VARIANTS = {
     # RSI stop C: lessons learned from past failures (memory/lessons), one revision round, frozen library
     "nolessons": BuildConfig(rounds=1),
     "lessons": BuildConfig(rounds=1),                                  # lessons_dir: the experiment's snapshot
+    "placebo": BuildConfig(rounds=1),       # same length and format as the lessons, generic advice only
 }
 SKILL_VARIANTS = {"train", "skill"}
-LESSON_VARIANTS = {"lessons"}
+# variant -> library it uses: snapshotted into runs/eval/<exp>/<variant>_library/ at the start, then frozen
+LESSON_VARIANTS = {"lessons": ROOT / "lessons", "placebo": ROOT / "eval" / "placebo_lessons"}
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--exp", required=True, help="experiment name -> runs/eval/<exp>/")
@@ -64,6 +66,11 @@ if args.tasks:
 exp_dir = ROOT / "runs" / "eval" / args.exp
 
 
+def lesson_snapshot(variant: str) -> Path:
+    # "lessons" keeps the folder name used by the first experiment (lessons_ab), so it can still be resumed
+    return exp_dir / ("lessons" if variant == "lessons" else f"{variant}_library")
+
+
 def config_for(variant: str) -> BuildConfig:
     cfg = VARIANTS[variant]
     if args.coder_model:
@@ -73,7 +80,7 @@ def config_for(variant: str) -> BuildConfig:
     if variant in SKILL_VARIANTS:
         cfg = replace(cfg, skills_dir=str(exp_dir / "skills"))
     if variant in LESSON_VARIANTS:
-        cfg = replace(cfg, lessons_dir=str(exp_dir / "lessons"))
+        cfg = replace(cfg, lessons_dir=str(lesson_snapshot(variant)))
     return cfg
 
 
@@ -93,12 +100,14 @@ if "train" in args.variants and args.workers != 1:
     print("note: 'train' accumulates a library, forcing --workers 1 (sequential, fixed order)")
     args.workers = 1
 exp_dir.mkdir(parents=True, exist_ok=True)
-if LESSON_VARIANTS & set(args.variants) and not (exp_dir / "lessons" / "lessons.json").exists():
-    # Snapshot the library once: every job of this experiment sees the same lessons, even if lessons/ changes.
-    (exp_dir / "lessons").mkdir(exist_ok=True)
-    shutil.copy(ROOT / "lessons" / "lessons.json", exp_dir / "lessons" / "lessons.json")
-lessons_now = [x["id"] for x in json.loads((exp_dir / "lessons" / "lessons.json").read_text())] \
-    if (exp_dir / "lessons" / "lessons.json").exists() else []
+lessons_now = {}
+for variant in set(args.variants) & set(LESSON_VARIANTS):
+    # Snapshot once: every job of this experiment sees the same library, even if the source changes later.
+    snapshot = lesson_snapshot(variant) / "lessons.json"
+    if not snapshot.exists():
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(LESSON_VARIANTS[variant] / "lessons.json", snapshot)
+    lessons_now[variant] = [x["id"] for x in json.loads(snapshot.read_text())]
 commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 skills_now = sorted(p.parent.name for p in (exp_dir / "skills").glob("*/skill.py"))
 manifest = {"exp": args.exp, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "git_commit": commit,

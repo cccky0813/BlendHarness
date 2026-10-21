@@ -55,7 +55,8 @@ def treatment_reached_coder(t) -> bool:
     used = result.get("lessons_used") or []
     if not used:
         return False
-    lessons = {x["id"]: x["text"] for x in json.loads((exp_dir / "lessons" / "lessons.json").read_text())}
+    library = exp_dir / ("lessons" if t.variant == "lessons" else f"{t.variant}_library") / "lessons.json"
+    lessons = {x["id"]: x["text"] for x in json.loads(library.read_text())}
     for payload in sorted((Path(t.run_dir) / "payloads").glob("*.json")):
         messages = json.loads(payload.read_text()).get("messages") or []
         if messages and messages[0].get("role") == "system" and "Lessons learned" in str(messages[0].get("content")):

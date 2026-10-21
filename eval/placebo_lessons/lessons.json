@@ -1,0 +1,83 @@
+[
+ {
+  "id": "descriptive_names",
+  "text": "Give every object, mesh and material a short descriptive name that says what it is, and use one consistent naming style across the whole script, so the objects listed in the scene are easy to recognise and anyone revising the script later can find each part quickly.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "small_functions",
+  "text": "Organise the script into small, clearly named helper functions with one job each instead of one long block of statements, and call them from a short main section at the end, so that the overall flow of the script can be read from top to bottom at a glance. Give each helper function a docstring of one line.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "helpful_comments",
+  "text": "Add a brief comment above each logical section of the script explaining what that section creates and why, keeping comments short and up to date, so a reader can follow the intent of the code without having to work it out from the individual statements. Remove comments that no longer match the code.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "reuse_materials",
+  "text": "Create each material once near the top of the script, store it in a clearly named variable, and reuse that variable wherever the material is needed instead of creating near-identical copies, which keeps the material list short and the script easier to maintain. Group the material definitions in one place.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "imports_at_top",
+  "text": "Keep all imports together at the very top of the script and do not import modules inside functions or loops; import only what the script actually uses, so that the dependencies of the script are visible in one place and the code stays clean and tidy. Sort the imports alphabetically for readability.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "readable_lines",
+  "text": "Prefer readable code over clever code: keep each line reasonably short, avoid deeply nested expressions and long one-liners, and split complicated statements into a few simple steps with intermediate variables that have meaningful names describing their contents. Avoid single-letter names outside of short loops.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "remove_leftovers",
+  "text": "Before finishing, make sure the script does not leave behind unused helper objects, empty meshes, unused materials or debugging prints from earlier attempts, so that the final scene contains only the parts that belong to the requested model and nothing else.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "consistent_style",
+  "text": "Follow one consistent code style throughout the script: the same quote style, the same spacing around operators, the same way of writing numbers and the same order of arguments in similar calls, because a uniform style makes the code easier to scan and review.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ },
+ {
+  "id": "short_summary",
+  "text": "When you are done, reply with a short, well-structured summary that lists the main parts you created and the materials you used, written in plain language and kept to a few lines, so the user can quickly understand what the final script builds.",
+  "category": "other",
+  "sources": [],
+  "evidence": [],
+  "uses": 0,
+  "successes": 0
+ }
+]
