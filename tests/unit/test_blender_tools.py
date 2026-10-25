@@ -87,6 +87,21 @@ def test_inspect_scene_lists_objects(blender):
     assert r.content.splitlines()[0] == "2 objects, 16 vertices" and "- Seat (MESH)" in r.content
 
 
+def test_inspect_scene_shows_where_the_geometry_is_not_only_the_origin(fake_session, tmp_path):
+    snap = {"summary": {"object_count": 2, "mesh_object_count": 1, "total_vertex_count": 8}, "objects": [
+        {"name": "Hook", "type": "MESH", "parent": None, "location": [0.0, 0.0, 0.0], "vertex_count": 8,
+         "material_names": [], "bbox": {"min": [-0.5, -0.1, 1.7], "max": [-0.4, -0.05, 1.75], "size": [0.1, 0.05, 0.05]}},
+        {"name": "Camera", "type": "CAMERA", "parent": None, "location": [3.0, 0.0, 2.0], "vertex_count": 0,
+         "material_names": [], "bbox": None}]}
+    blender = BlenderTools(fake_session, tmp_path)
+    blender.current_script = "x = 1"
+    blender.snapshot = lambda: snap
+    lines = blender.inspect_scene().content.splitlines()
+    assert lines[2] == ("- Hook (MESH) center=[-0.45, -0.075, 1.725] size=[0.1, 0.05, 0.05] z=1.7..1.75 "
+                        "origin=[0.0, 0.0, 0.0] verts=8 materials=[]")
+    assert lines[3] == "- Camera (CAMERA) origin=[3.0, 0.0, 2.0] verts=0 materials=[]"
+
+
 def test_preamble_is_prepended_and_traceback_lines_are_mapped(fake_session, tmp_path):
     blender = BlenderTools(fake_session, tmp_path, preamble_provider=lambda: "def helper():\n    pass\n")
     blender.execute_bpy(CHAIR)

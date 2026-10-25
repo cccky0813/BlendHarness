@@ -10,7 +10,7 @@ Good lessons:
 - are general: they apply to any object or scene, not to one task (no object names, no task-specific numbers);
 - are actionable while coding: they say what to compute or check, e.g. "derive the z of every part from the
   top of the bounding box of the part it rests on" rather than "be careful with positions";
-- can be checked with the agent's tools (inspect_scene lists every object's location and bounding-box size);
+- can be checked with the agent's tools (inspect_scene lists every object's world bounding box: center, size and z range);
 - are short: one or two sentences, imperative.
 
 Each lesson must be supported by problems from at least TWO different tasks (cite their case numbers).

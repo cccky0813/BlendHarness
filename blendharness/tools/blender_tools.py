@@ -114,11 +114,16 @@ class BlenderTools:
         snap = self.snapshot()
         if "error" in snap:
             return ToolResult(f"ERROR: {snap['error']}", is_error=True)
-        lines = [f"{snap['summary']['object_count']} objects, {snap['summary']['total_vertex_count']} vertices"]
+        lines = [f"{snap['summary']['object_count']} objects, {snap['summary']['total_vertex_count']} vertices",
+                 "(center/size/z = where the geometry is in world space; origin = the object's pivot, which can "
+                 "differ from the geometry, e.g. when vertices were placed directly)"]
         for o in snap["objects"]:
-            bbox = o.get("bbox") or {}
+            bbox = o.get("bbox")
+            # The pivot alone misled the Critic: hooks built in mesh coordinates all reported loc=[0,0,0].
+            where = (f"center={[round((lo + hi) / 2, 4) for lo, hi in zip(bbox['min'], bbox['max'])]} "
+                     f"size={bbox['size']} z={bbox['min'][2]}..{bbox['max'][2]} " if bbox else "")
             lines.append(
-                f"- {o['name']} ({o['type']}) loc={o['location']} size={bbox.get('size')} "
+                f"- {o['name']} ({o['type']}) {where}origin={o['location']} "
                 f"verts={o['vertex_count']} materials={o['material_names']}"
                 + (f" parent={o['parent']}" if o["parent"] else "")
             )
@@ -218,9 +223,9 @@ class BlenderTools:
             Tool(
                 name="inspect_scene",
                 description=(
-                    "List every object produced by the last successful script: name, type, location, "
-                    "bounding-box size, vertex count, materials, parent. Use it to check proportions "
-                    "and that all requested parts exist."
+                    "List every object produced by the last successful script: name, type, world bounding box "
+                    "(center, size, z range), origin, vertex count, materials, parent. Use it to check proportions, "
+                    "that parts touch where they should, and that all requested parts exist."
                 ),
                 parameters={"type": "object", "properties": {}, "required": []},
                 fn=self.inspect_scene,

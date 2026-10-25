@@ -68,6 +68,17 @@ def test_bounding_boxes_follow_transforms_set_after_creation(session, tmp_path):
     assert "size=[0.5, 0.5, 2.0]" in blender.inspect_scene().content
 
 
+def test_inspect_scene_locates_geometry_built_in_mesh_coordinates(session, tmp_path):
+    """Vertices placed directly at x=2 leave the object's origin at 0: inspect_scene must show both."""
+    blender = BlenderTools(session, tmp_path)
+    code = ("import bpy\nm = bpy.data.meshes.new('Hook')\n"
+            "m.from_pydata([(2, 0, 1), (2.2, 0, 1), (2.2, 0.1, 1), (2, 0.1, 1.3)], [], [(0, 1, 2, 3)])\n"
+            "o = bpy.data.objects.new('Hook', m)\nbpy.context.scene.collection.objects.link(o)\n")
+    assert not blender.execute_bpy(code).is_error
+    line = next(l for l in blender.inspect_scene().content.splitlines() if l.startswith("- Hook"))
+    assert "center=[2.1, 0.05, 1.15]" in line and "origin=[0.0, 0.0, 0.0]" in line and "z=1.0..1.3" in line
+
+
 def test_mcp_client_builds_and_sees_renders(session, tmp_path):
     """End to end: an MCP client builds a model in the real Blender and receives the renders as images."""
     pytest.importorskip("mcp")

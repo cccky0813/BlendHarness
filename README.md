@@ -21,7 +21,7 @@ The original idea comes from the [LL3M paper](https://arxiv.org/abs/2508.08228).
 - **Self-evolving skill library.** A librarian distills approved builds into reusable functions, admitted only through four gates (static, dedup, sandbox, structure plus vision) with one repair round. Skills are listed in the prompt and loaded on demand.
 - **Tracing and evaluation.** Every LLM call, tool call and agent run is a span with tokens, cost and latency. A resumable, crash-isolated eval runner interleaves variants for fair comparison.
 - **Trace-based evaluation and gated self-evolution.** Every past build is rebuilt from its trace into process metrics and a root-cause failure taxonomy. A Reflector turns failure cases into lessons (semantic memory), which are only adopted if a pre-registered A/B test on unseen tasks, with a placebo control, shows they help. So far they did not, and the gate kept them out (see Results).
-- **Tested.** 201 tests in about 6 s: unit tests on a scripted fake LLM and fake Blender, layering rules, and integration tests on a real Blender.
+- **Tested.** 228 tests in about 7 s: unit tests on a scripted fake LLM and fake Blender, layering rules, and integration tests on a real Blender.
 
 ## Architecture
 
