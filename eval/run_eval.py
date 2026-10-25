@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VARIANTS = {
     "baseline": BuildConfig(edit_tools=False, compact_context=False),  # before M3 (full rewrites, full history)
     "m3": BuildConfig(),                                               # edit_script + history compaction
+    "m3_deepseek": BuildConfig(coder_model="deepseek-v4-pro"),         # same pipeline, cheaper coder
     # M4 learning curve: skills_dir is filled in per experiment (runs/eval/<exp>/skills)
     "train": BuildConfig(learn_skills=True),                          # build + extract/admit skills (run sequentially!)
     "noskill": BuildConfig(),                                          # test without the library

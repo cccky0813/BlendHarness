@@ -1,0 +1,158 @@
+[
+ {
+  "id": "mug",
+  "tier": "easy",
+  "prompt": "Create a realistic ceramic coffee mug: cylindrical body with a hollow open top and visible wall thickness, a C-shaped handle attached to the side, glossy white ceramic material, and dark coffee liquid inside.",
+  "set": "old_m3"
+ },
+ {
+  "id": "chair",
+  "tier": "easy",
+  "prompt": "Create a wooden dining chair: four legs, a square seat, a backrest with three vertical slats between two back posts, and side stretchers connecting the front and back legs near the floor. Natural wood material.",
+  "set": "old_m3"
+ },
+ {
+  "id": "lamp",
+  "tier": "medium",
+  "prompt": "Create a desk lamp: a round weighted base, an adjustable arm made of two straight segments joined by a visible hinge, and a cone-shaped lampshade at the end of the arm with a glowing bulb visible inside. Matte black metal with a warm emissive bulb.",
+  "set": "old_m3"
+ },
+ {
+  "id": "desk",
+  "tier": "medium",
+  "prompt": "Create a writing desk: a rectangular top, four legs, and a drawer unit under the right side of the top with three stacked drawers, each drawer front with a small metal handle. Oak wood top and legs, white painted drawer unit.",
+  "set": "old_m3"
+ },
+ {
+  "id": "game_scene",
+  "tier": "hard",
+  "prompt": "Create a small low-poly game scene on a 10 m x 10 m grass ground: a cozy cottage (walls, pitched roof, a door, two windows, a chimney), a stone well with a small wooden roof, a wooden fence along one side of the ground, two stylized trees (trunk + foliage), and a dirt path from the cottage door to the well. Game-ready low-poly style with a distinct color material per element. Keep the whole scene under 20,000 vertices.",
+  "set": "old_m3"
+ },
+ {
+  "id": "kitchen",
+  "tier": "hard",
+  "prompt": "Create a small kitchen corner: a floor and two walls meeting at a right angle, an L-shaped run of base cabinets along both walls with a continuous countertop on top, a sink with a faucet set into the countertop, two upper wall cabinets mounted above the countertop, and a simple handle on every cabinet door. Keep the whole scene under 20,000 vertices.",
+  "set": "old_m3"
+ },
+ {
+  "id": "bunk_bed",
+  "tier": "medium",
+  "prompt": "Create a two-level wooden bunk bed: four tall corner posts, a lower bed frame near the floor and an upper bed frame about 1.5 m higher, each holding a mattress, a ladder of five evenly spaced rungs fixed to one end of the upper frame, and a safety rail along each long side of the upper frame. Use natural wood for the frame and pale grey for the mattresses.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "hammock_stand",
+  "tier": "medium",
+  "prompt": "Create a garden hammock stand: two A-shaped leg pairs at the ends, one top beam across them, and a flat fabric bed hanging below the beam from four thin vertical rods attached to the beam right above its corners. Blue metal frame, white fabric.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "pergola",
+  "tier": "medium",
+  "prompt": "Create a garden pergola: four square posts at the corners of a 3 m x 3 m stone patio, two main beams resting on top of the posts along one direction, and seven evenly spaced roof slats lying across the main beams in the other direction, overhanging slightly on both sides. Weathered wood, grey stone patio.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "park_bench_bin",
+  "tier": "easy",
+  "prompt": "Create a park bench whose seat is made of five slats and whose backrest is made of three slats, held by two cast-iron side frames that include armrests, plus a round waste bin with a lid standing on the ground about half a metre to the right of the bench. Dark green iron, brown wooden slats and a black waste bin.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "entryway",
+  "tier": "medium",
+  "prompt": "Create an entryway corner against one wall: a wall-mounted coat rack board with four evenly spaced hooks, a hat shelf mounted on the wall directly above the coat rack and the same width, and a low shoe bench standing on the floor directly below the coat rack, centred under it. Oak wood, black metal hooks.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "laundry_stack",
+  "tier": "easy",
+  "prompt": "Create a laundry corner: a front-loading washing machine on the floor with a dryer stacked exactly on top of it (same footprint, aligned edges), each with a round door window on the front face, and a wall shelf mounted just above the dryer holding two detergent bottles. White appliances, light wood shelf.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "footbridge",
+  "tier": "medium",
+  "prompt": "Create a small wooden footbridge crossing a stream: two stone banks on either side of a shallow blue water strip, a straight bridge deck made of planks resting on both banks, and a railing on each side of the deck with posts at both ends and in the middle connected by a handrail along the full length. Wood bridge, grey stone, blue water.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "tv_wall",
+  "tier": "medium",
+  "prompt": "Create a living-room TV wall: a low TV console standing against the wall, a flat TV on a small stand centred on top of the console, and two wall shelves mounted above the TV, one on each side, at the same height and symmetric about the TV's centre. Walnut furniture, black TV.",
+  "set": "old_lessons"
+ },
+ {
+  "id": "bookshelf",
+  "tier": "relations",
+  "prompt": "Create a wooden bookshelf 1.8 m tall and 0.9 m wide: two side panels, a back panel, a top and a bottom board, and four inner shelves evenly spaced between them. Put a row of upright books on the second and fourth shelf, standing on the shelf and leaning against nothing. Walnut wood, books in assorted colors.",
+  "set": "new"
+ },
+ {
+  "id": "garden_fence",
+  "tier": "relations",
+  "prompt": "Create a 3 m long garden fence segment: four square posts evenly spaced along the length, two horizontal rails (low and high) running between the outer posts and attached to every post, and twelve identical pickets evenly spaced along the rails, each touching both rails, with all picket tops at the same height. White painted wood, on a grass strip.",
+  "set": "new"
+ },
+ {
+  "id": "dining_set",
+  "tier": "relations",
+  "prompt": "Create a dining set: a rectangular table 1.6 m x 0.9 m with four legs, and four identical chairs, two on each long side, placed symmetrically about the table's center, each facing the table with its seat front just under the table edge. Oak table, upholstered grey chairs, on a rug centered under the table.",
+  "set": "new"
+ },
+ {
+  "id": "swing_set",
+  "tier": "relations",
+  "prompt": "Create a backyard swing set: two A-shaped leg pairs at the ends, a horizontal top beam resting on both A-frames, and two identical swings hanging from the beam, placed symmetrically about the beam's middle. Each swing is a flat seat 0.45 m above the ground hung by two vertical ropes attached to the beam directly above the seat ends. Green metal frame, wooden seats.",
+  "set": "new"
+ },
+ {
+  "id": "bed_nightstands",
+  "tier": "relations",
+  "prompt": "Create a bedroom wall: a double bed with its headboard against the wall, and two identical nightstands placed symmetrically on both sides of the bed, touching the wall, with their tops slightly higher than the mattress. Put a table lamp centered on each nightstand. Light wood furniture, white bedding, beige wall.",
+  "set": "new"
+ },
+ {
+  "id": "wall_shelves",
+  "tier": "relations",
+  "prompt": "Create a wall with three identical floating shelves stacked vertically, 0.3 m apart and centered on each other. Each shelf is held by two identical metal brackets attached to the wall and placed symmetrically under it. Put one small potted plant centered on each shelf. White wall, oak shelves, black brackets.",
+  "set": "new"
+ },
+ {
+  "id": "staircase",
+  "tier": "relations",
+  "prompt": "Create a straight wooden staircase with eight identical steps: every step rises 0.18 m and is 0.28 m deep, the first step sits on the floor and each step rests on the one below. Two side stringers run along the full length touching every step, and a handrail on posts follows the slope on one side, with a post at every second step. Pine wood.",
+  "set": "new"
+ },
+ {
+  "id": "kitchen_island",
+  "tier": "relations",
+  "prompt": "Create a kitchen island: a rectangular base cabinet 1.8 m long with a countertop that overhangs 0.25 m on one long side, and three identical bar stools evenly spaced along that overhang, their seats 0.75 m high and centered under the overhang. White cabinet, marble top, black metal stools.",
+  "set": "new"
+ },
+ {
+  "id": "picnic_table",
+  "tier": "relations",
+  "prompt": "Create a wooden picnic table: a top made of five identical planks evenly spaced with small gaps, two A-shaped leg frames at the ends, and two benches parallel to the table on both long sides at the same height, each bench made of two identical planks resting on cross beams that extend from the leg frames. Weathered wood.",
+  "set": "new"
+ },
+ {
+  "id": "window",
+  "tier": "relations",
+  "prompt": "Create a window in a wall section: a rectangular wooden frame 1.2 m wide and 1.5 m tall set into the wall, divided by mullions into a 2 x 3 grid of identical glass panes, and a sill centered under the frame that sticks out from the wall. White frame, light blue glass, brick wall.",
+  "set": "new"
+ },
+ {
+  "id": "cd_tower",
+  "tier": "relations",
+  "prompt": "Create a slim media tower: two tall side panels, a base and a top, and seven identical horizontal shelves evenly spaced between base and top, each shelf touching both side panels. Put a stack of boxes on every other shelf, each stack centered on its shelf. Black lacquered wood.",
+  "set": "new"
+ },
+ {
+  "id": "pergola_bench",
+  "tier": "relations",
+  "prompt": "Create a small garden pergola over a bench: four corner posts on a square 2.4 m wooden deck, two beams resting on top of the posts along one direction, six identical rafters evenly spaced resting across the beams, and a bench centered under the pergola against two of the posts. Cedar wood, grey deck.",
+  "set": "new"
+ }
+]
