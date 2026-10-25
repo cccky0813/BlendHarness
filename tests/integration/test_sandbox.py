@@ -55,6 +55,19 @@ def test_blender_tools_on_the_real_sandbox(session, tmp_path):
     assert blender.snapshot()["objects"][0]["location"] == [0.0, 0.0, 1.5]
 
 
+def test_bounding_boxes_follow_transforms_set_after_creation(session, tmp_path):
+    """Setting obj.location / obj.scale does not update matrix_world by itself; the Scene-Inspector must
+    refresh it, or world bounding boxes stay at the origin and sizes ignore the scale (found by the
+    structural audit: 35% of past builds were affected)."""
+    blender = BlenderTools(session, tmp_path)
+    late = CUBE + "o = bpy.data.objects['Box']\no.location = (2.0, 0.0, 1.2)\no.scale = (0.5, 0.5, 2.0)\n"
+    assert not blender.execute_bpy(late).is_error
+    bbox = blender.snapshot()["objects"][0]["bbox"]
+    assert bbox["min"] == [1.75, -0.25, 0.2] and bbox["max"] == [2.25, 0.25, 2.2]
+    assert bbox["size"] == [0.5, 0.5, 2.0]
+    assert "size=[0.5, 0.5, 2.0]" in blender.inspect_scene().content
+
+
 def test_mcp_client_builds_and_sees_renders(session, tmp_path):
     """End to end: an MCP client builds a model in the real Blender and receives the renders as images."""
     pytest.importorskip("mcp")

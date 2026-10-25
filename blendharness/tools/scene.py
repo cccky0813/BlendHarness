@@ -38,9 +38,12 @@ def extract_prefixed_json(stdout: str, prefix: str) -> Optional[dict]:
 
 
 # Appended after the agent's script; prints one JSON line with the structured scene state.
+# view_layer.update() first: a script that sets obj.location / obj.scale leaves matrix_world stale until the
+# depsgraph is evaluated, and the world bounding boxes below would then sit at the origin, unscaled.
 SCENE_INSPECTOR_SCRIPT = f"""
 import bpy as _bpy, json as _json
 from mathutils import Vector as _V
+_bpy.context.view_layer.update()
 def _r(v): return [round(float(x), 4) for x in v]
 def _bbox(o):
     c = [o.matrix_world @ _V(p) for p in o.bound_box]

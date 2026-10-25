@@ -111,7 +111,7 @@ All numbers come from the eval harness and were measured before the October 2026
 |---|---|---|
 | `m3_vs_baseline` | 6 tasks x 2 repeats, full rewrites + full history vs. edit tool + compaction (v1) | Same pass rate (75%) and −13% cost per task. **Revision rounds got more expensive** (median $0.446 vs $0.274): compaction hid the script being edited (17 re-reads), and many small edits meant many round trips. A single-run "−73%" did not replicate. |
 | `m3v2` | Pinned current script + batched all-or-nothing edits, 3 hardest tasks x 2 | **6/6 passed** (baseline 4/6), **−14% cost per task**, 0 re-reads. 85–92% of revision output tokens are hidden thinking, so the remaining cost lever is reasoning control, not context. |
-| `skills_lc` | Learning curve: train on 5 tasks, then test on 5 unseen tasks that share components, with vs. without the library | Library grew to 10 verified skills (the repair round rescued 8 rejected candidates). Test pass rate was 6/10 with skills vs 8/10 without, **but all 4 failures were unrelated to skills**. Only **4/10 runs adopted a skill**. Where skills were used (village), 2/2 passed in the first round at −34% cost. Bottleneck: coarse, whole-object skills transfer poorly. |
+| `skills_lc` | Learning curve: train on 5 tasks, then test on 5 unseen tasks that share components, with vs. without the library | Library grew to 10 verified skills (the repair round rescued 8 rejected candidates; the 5 structural rejections among them later proved to be false alarms caused by a Scene-Inspector bug, see below). Test pass rate was 6/10 with skills vs 8/10 without, **but all 4 failures were unrelated to skills**. Only **4/10 runs adopted a skill**. Where skills were used (village), 2/2 passed in the first round at −34% cost. Bottleneck: coarse, whole-object skills transfer poorly. |
 
 ### Self-evolution from failures, gated by evaluation (October 2026)
 
@@ -131,7 +131,7 @@ The skill library learned in `skills_lc` is in [`skills/`](skills/):
 ![Skill library: 10 skills rendered with default parameters](docs/skill_library.png)
 
 Lessons that shaped the design, each found through traces or evals:
-- "Runs" is not "correct": 3 of the first 9 extracted skills executed fine but were broken (parts sunk or overlapping). A free structural check (grounded and connected) catches them.
+- Checkers need checking too. The structural gate (grounded and connected) rejected 5 skill candidates as "sunk". A later geometry-only audit of all 144 builds showed these were false alarms: scripts that set `obj.location` / `obj.scale` without a depsgraph update left `matrix_world` stale, so the Scene-Inspector's world bounding boxes sat at the origin, unscaled (35% of builds had at least one such object). The Inspector now refreshes the view layer first, and all 5 candidates pass. The A/B results above are unaffected, since both arms of each comparison shared the bug.
 - Reasoning models over-think. Default thinking used 12k–32k tokens before the first tool call. `reasoning_effort: low` cut it to about 1.7k, and the same flag *turns thinking on* for Haiku, so effort is set per agent.
 - The relay closed some streams silently after two tokens. Streams without `finish_reason` are now treated as incomplete and retried.
 
