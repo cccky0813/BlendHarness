@@ -50,7 +50,8 @@ class FakeSession:
     """Fakes BlenderSession.execute(). Conventions inside test scripts:
     - a line `raise ...` makes the script fail;
     - every `make_mesh("Name")` creates one mesh object called Name.
-    The Scene-Inspector is recognised by its output prefix and answered with those objects.
+    The Scene-Inspector and the skill sandbox probe are recognised by their output prefixes and answered
+    with those objects (every object sits in the unit box at the origin: grounded and touching).
     """
 
     def __init__(self, log_path=None) -> None:
@@ -72,9 +73,11 @@ class FakeSession:
         if "BA_SCENE_RESULT=" in code:
             objects = [{"name": n, "type": "MESH", "location": [0, 0, 0], "scale": [1, 1, 1],
                         "dimensions": [1, 1, 1], "vertex_count": 8, "material_names": [], "parent": None,
-                        "bbox": {"size": [1, 1, 1]}} for n in names]
+                        "bbox": {"min": [0, 0, 0], "max": [1, 1, 1], "size": [1, 1, 1]}} for n in names]
             summary = {"object_count": len(names), "mesh_object_count": len(names),
                        "total_vertex_count": 8 * len(names)}
             return ExecResult(ok=True, output="BA_SCENE_RESULT=" + json.dumps(
                 {"summary": summary, "objects": objects}))
+        if "BA_SKILL_CHECK=" in code:          # the skill admission's sandbox probe
+            return ExecResult(ok=True, output="BA_SKILL_CHECK=" + json.dumps({"meshes": len(names)}))
         return ExecResult(ok=True, output="", duration_s=0.01)

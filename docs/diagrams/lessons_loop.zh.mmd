@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    participant TR as 历史运行<br/>trace · result.json
+    participant AN as analysis/<br/>轨迹 · 指标 · 分类
+    participant RF as Reflector
+    participant G as 教训关卡
+    participant L as lessons/
+    participant EV as A/B 评测<br/>含安慰剂对照
+
+    AN->>TR: 还原每次建模：每轮 Coder、工具调用、问题生命周期
+    AN->>AN: 过程指标 + 按根因分类失败
+    Note over AN: 空间问题占 72%<br/>相对位置 / 比例<br/>只修好 43–45%
+    AN->>RF: 一类失败的全部案例
+    RF-->>G: 2–5 条候选教训 + 引用的案例
+    G->>G: 静态 → 通用性（≥ 2 道题）→ 去重
+    G->>L: 写入 9 条教训
+    L->>EV: 冻结快照，三组交错运行
+    alt 置信区间完全低于 0
+        EV-->>L: 默认启用
+    else 跨过 0（本次结果）
+        EV-->>L: 不启用：关卡拒绝了这次进化
+    end

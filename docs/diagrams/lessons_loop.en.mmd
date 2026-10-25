@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    participant TR as Past runs<br/>trace · result.json
+    participant AN as analysis/<br/>trajectories · metrics
+    participant RF as Reflector
+    participant G as Lesson gates
+    participant L as lessons/
+    participant EV as A/B eval<br/>with placebo arm
+
+    AN->>TR: rebuild every build: coder runs, tool calls, issue lifecycles
+    AN->>AN: process metrics + root-cause failure taxonomy
+    Note over AN: spatial: 72% of issues<br/>placement / proportion<br/>fixed only 43–45%
+    AN->>RF: all cases of one failure category
+    RF-->>G: 2–5 candidate lessons + cited cases
+    G->>G: static → generality (≥ 2 tasks) → dedup
+    G->>L: store 9 lessons
+    L->>EV: frozen snapshot, three interleaved arms
+    alt CI entirely below 0
+        EV-->>L: enable by default
+    else CI crosses 0 (this result)
+        EV-->>L: keep disabled: the gate rejected this evolution
+    end

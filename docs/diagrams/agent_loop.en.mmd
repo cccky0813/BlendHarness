@@ -1,0 +1,31 @@
+sequenceDiagram
+    autonumber
+    participant C as Coder<br/>AgentLoop
+    participant H as Context<br/>Engine
+    participant R as Rails
+    participant M as LLM
+    participant T as ToolRegistry<br/>+ tools
+    participant S as Guard<br/>Blender sandbox
+    participant D as Skill<br/>library
+
+    Note over C: messages = [system, user]
+    loop every step (≤ max_steps)
+        C->>H: messages (full history)
+        H-->>C: view: omit stale scripts, pin current one
+        C->>M: chat(view, tool schemas)
+        M-->>C: text or tool_calls
+        C->>R: after_llm: truncated?
+        alt "I'm done"
+            C->>R: on_final_answer
+            R-->>C: done · nudge · stop
+        else tool calls
+            C->>T: execute(ToolCall)
+            opt load_skill
+                T->>D: read skill code → preamble
+            end
+            T->>S: guard → prepend skills → run in empty scene
+            S-->>T: result (watchdog on hangs)
+            T-->>C: tool message (error as observation)
+            C->>R: stuck? over budget?
+        end
+    end

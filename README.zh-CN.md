@@ -95,6 +95,28 @@ flowchart TB
 - **由便宜到贵**：先做确定性的程序检查，再调用视觉模型。
 - **故障安全**：评审和关卡拿不准时，一律判为不通过。
 
+## 一次建模是怎么跑起来的
+
+整体是两层嵌套的循环：
+- **外层是 workflow**，流程由代码写死：建模 → 评审 → 修改 → 核实 → 学习，每个阶段结束都存一次档；
+- **内层是 agent loop**，每一步做什么由模型自己决定。
+
+只有 Coder 跑在 agent loop 里；Critic、Verifier、Librarian 都只是一次 LLM 调用。
+
+**图 A · Workflow（外层，由代码决定流程）**
+
+![Workflow 时序图：run_build 依次调度 Coder、Critic、Verifier、Librarian，每个阶段结束都存档](docs/diagrams/workflow.zh.png)
+
+**图 B · Agent loop（内层，由模型决定每一步）**：每一次 `coder.run(...)` 内部发生的事
+
+![Agent loop 时序图：一步之内的上下文引擎、LLM 调用、rails、工具注册表、沙箱检查和技能](docs/diagrams/agent_loop.zh.png)
+
+**图 C · 从失败中学习教训（离线进行，由评测把关）**
+
+![教训学习时序图：历史 trace、分析、Reflector、关卡、教训库和 A/B 评测关卡](docs/diagrams/lessons_loop.zh.png)
+
+图的源码放在 [`docs/diagrams/`](docs/diagrams/)（Mermaid 格式）。修改后运行 `python scripts/render_diagrams.py`，就会用 headless Chrome 重新生成图片。
+
 ## 实验结果
 
 所有数字都来自评测框架，测量于 2026 年 10 月的重构之前（commit `e46c5ab`）。重构保持了行为不变：原有测试一行未改且全部通过，提示词逐字一致，上下文策略也通过了差分测试。Coder 使用 Claude Sonnet，`reasoning_effort` 设为 `low`；Critic、Verifier 和技能评审使用 Claude Haiku。**每个条件只跑了 2 次**，较小的差异应视为随机波动。
@@ -194,12 +216,12 @@ blendharness/
   workflow/    build.py  state.py  learning/admission.py  learning/learn.py  learning/lessons.py
   protocol/    mcp_server.py
 eval/          run_eval.py  report.py  compare.py  analyze.py  tasks*.json  placebo_lessons/
-scripts/       run_build.py  reflect.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
+scripts/       run_build.py  render_diagrams.py  reflect.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
 tests/         unit/  integration/  fakes.py
 skills/        学到的技能库
 lessons/       学到的经验教训（默认不启用：没有通过 A/B 关卡）
 config/        prices.json
-docs/          architecture.md  mcp.md  roadmap.md  图片
+docs/          architecture.md  mcp.md  roadmap.md  diagrams/（Mermaid 源码 + PNG）  图片
 ```
 
 ## 局限与后续计划

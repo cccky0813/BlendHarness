@@ -1,0 +1,31 @@
+sequenceDiagram
+    autonumber
+    participant C as Coder<br/>AgentLoop
+    participant H as Context<br/>Engine
+    participant R as Rails
+    participant M as LLM
+    participant T as ToolRegistry<br/>+ 工具
+    participant S as Guard<br/>Blender 沙箱
+    participant D as 技能库
+
+    Note over C: messages = [system, user]
+    loop 每一步（≤ max_steps）
+        C->>H: messages（完整历史）
+        H-->>C: view：省略旧脚本，钉住当前脚本
+        C->>M: chat(view, 工具说明)
+        M-->>C: 文本 或 tool_calls
+        C->>R: after_llm：被截断了？
+        alt 说“做完了”
+            C->>R: on_final_answer
+            R-->>C: done · Nudge · Stop
+        else 调用工具
+            C->>T: execute(ToolCall)
+            opt load_skill
+                T->>D: 读技能代码 → preamble
+            end
+            T->>S: 静态检查 → 拼技能 → 空场景执行
+            S-->>T: 结果（看门狗兜底）
+            T-->>C: tool 消息（错误即观察）
+            C->>R: 卡住？超预算？
+        end
+    end

@@ -1,0 +1,32 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户 / 评测
+    participant W as Workflow<br/>run_build
+    participant C as Coder<br/>AgentLoop
+    participant J as Critic · Verifier<br/>Librarian
+    participant D as 磁盘<br/>技能 · 教训 · 存档
+
+    U->>W: run_build(指令, 配置)
+    W->>D: 读教训（锁定）+ 技能目录
+    W->>C: make_coder：提示词 + 教训 + 技能目录，注册工具
+    Note over W,D: round 0：建模 + 开放式评审
+    W->>C: coder.run(指令)
+    Note over C: agent loop（见图 B）
+    C-->>W: LoopResult
+    W->>J: Critic：渲染图 + 场景文本
+    J-->>W: 通过 · 或问题列表
+    W->>D: 存档 round0
+    loop 修改轮 k = 1…N（未通过时）
+        W->>C: coder.run(原指令 + 未修好的问题)
+        C-->>W: LoopResult
+        W->>J: Verifier：前后对比 + 场景 diff
+        J-->>W: 每个问题 FIXED / NOT_FIXED
+        W->>D: 存档 roundk
+    end
+    opt 通过 且 开启学习
+        W->>J: Librarian：提炼候选技能
+        J-->>W: 候选技能
+        W->>D: 过准入关卡的写入技能库
+    end
+    W->>D: final_script · result.json · trace
+    W-->>U: 是否通过 · 轮数 · 成本

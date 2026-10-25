@@ -1,0 +1,32 @@
+sequenceDiagram
+    autonumber
+    actor U as User / eval
+    participant W as Workflow<br/>run_build
+    participant C as Coder<br/>AgentLoop
+    participant J as Critic · Verifier<br/>Librarian
+    participant D as Disk<br/>skills · lessons · checkpoints
+
+    U->>W: run_build(prompt, config)
+    W->>D: read lessons (frozen) + skill index
+    W->>C: make_coder: prompt + lessons + skill index, register tools
+    Note over W,D: round 0: build + open critique
+    W->>C: coder.run(prompt)
+    Note over C: agent loop (diagram B)
+    C-->>W: LoopResult
+    W->>J: Critic: renders + scene text
+    J-->>W: approved · or issues
+    W->>D: checkpoint round0
+    loop revision k = 1…N (while not approved)
+        W->>C: coder.run(prompt + unresolved issues)
+        C-->>W: LoopResult
+        W->>J: Verifier: before/after + scene diff
+        J-->>W: FIXED / NOT_FIXED per issue
+        W->>D: checkpoint roundk
+    end
+    opt approved and learning on
+        W->>J: Librarian: propose skills
+        J-->>W: candidate skills
+        W->>D: store those passing the gates
+    end
+    W->>D: final_script · result.json · trace
+    W-->>U: approved · rounds · cost

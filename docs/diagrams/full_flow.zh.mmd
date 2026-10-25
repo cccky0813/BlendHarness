@@ -1,0 +1,83 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户 / CLI / 评测
+    box transparent 编排层 workflow
+        participant W as Workflow<br/>run_build · _Build
+    end
+    box transparent Agent 层
+        participant C as Coder<br/>AgentLoop
+        participant J as Critic · Verifier · Librarian<br/>单次 LLM 调用
+    end
+    box transparent core 通用机制
+        participant CE as Context Engine
+        participant R as Rails
+        participant M as LLM 模型
+        participant T as ToolRegistry
+    end
+    box transparent 工具与沙箱
+        participant BT as BlenderTools<br/>SkillTools
+        participant SB as Guard<br/>Blender 沙箱
+    end
+    box transparent 记忆与持久化
+        participant MEM as 长期记忆<br/>skills/ · lessons/
+        participant CK as Checkpoint<br/>Trace
+    end
+
+    U->>W: run_build(prompt, BuildConfig)
+    W->>CK: 新建 BuildState · 打开 run span（trace 根）
+    W->>MEM: 读教训（锁定 lesson_ids）+ 技能目录
+    MEM-->>W: 教训原文 · 每个技能一行“名字: 描述”
+    W->>C: make_coder：系统提示词 = coder.md + 教训 + 技能目录<br/>工具列表 → ToolRegistry（5 个工具，带权限档）
+
+    Note over W,CK: round 0：建模 + 开放式评审
+    W->>C: coder.run(用户指令)　messages = [system, user]
+    loop 每一步（最多 max_steps 步）
+        C->>CE: messages（完整历史）
+        CE-->>C: view：省略旧脚本 · 钉住当前脚本 · 预算守卫
+        C->>M: chat(view, tools = schemas)
+        M-->>C: LLMResponse：文本 或 tool_calls
+        C->>R: after_llm：回答被截断了吗
+        alt 没有工具调用（模型说“我做完了”）
+            C->>R: on_final_answer：CompletionRail 核实
+            R-->>C: 放行则结束 done · Nudge 提醒再给一步 · Stop 结束
+        else 有工具调用
+            C->>T: execute(ToolCall)
+            T->>BT: 按名字找到 Tool → tool.fn(**arguments)
+            opt load_skill
+                BT->>MEM: 读技能 → 加进 loaded，返回函数签名
+            end
+            BT->>SB: guard 静态检查 → 拼上技能代码 → 空场景执行
+            SB-->>BT: ExecResult（看门狗处理超时与崩溃）
+            BT-->>T: ToolResult（执行成功才更新 current_script）
+            T-->>C: tool 消息：错误即观察 · 超长截断 · 记 tool span
+            C->>R: after_tool / after_step：同错 3 次？超预算？
+        end
+    end
+    C-->>W: LoopResult(status, steps, cost)
+    W->>BT: render() + inspect_scene()
+    W->>J: Critic：渲染图 + 场景文本，问“有什么问题”
+    J-->>W: approved 或 issues → open_issues · feedback
+    W->>CK: 存档 000_round0.json
+
+    loop 修改轮 k = 1 … rounds（还没通过时）
+        W->>BT: snapshot()：修改前的结构快照
+        W->>C: coder.run(修改任务 = 原指令 + feedback)<br/>新的 messages，Pin 钉住当前脚本
+        Note over C,SB: 同一个 agent loop（步骤 7 – 21）
+        C-->>W: LoopResult
+        W->>BT: render() + snapshot() → diff_snapshots
+        W->>J: Verifier：前后渲染图 + diff，逐条核实（diff 为空则不调 LLM）
+        J-->>W: FIXED / PARTIAL / NOT_FIXED + 回归问题，只留下没修好的
+        W->>CK: 存档 00k_roundk.json
+    end
+
+    opt 通过了 且 learn_skills
+        W->>J: Librarian：从最终脚本提炼候选技能
+        J-->>W: 最多 3 个候选
+        W->>SB: 准入关卡：静态 → 去重 → 沙箱试跑 → 结构 + 视觉评审
+        W->>MEM: 写入技能库（被拒的有一次修复机会）
+        W->>CK: 存档 learned
+    end
+
+    W->>MEM: 已加载技能的使用统计 +1
+    W->>CK: final_script.py · result.json · trace.jsonl
+    W-->>U: result：是否通过 · 轮数 · 成本

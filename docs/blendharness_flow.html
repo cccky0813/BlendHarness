@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BlendHarness 系统流程图</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column for text, full-width scrollable bands for the two sequence diagrams */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #1c2430;
+  --muted: #5b6676;
+  --line: #d9dde4;
+  --accent: #d9700b;          /* Blender orange: the sandbox / execution side */
+  --accent-soft: #fbeedd;
+  --font-body: "IBM Plex Sans", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161c; --surface: #1a2029; --fg: #e3e7ee; --muted: #9aa5b5; --line: #2e3744;
+    --accent: #f0913a; --accent-soft: #33261a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161c; --surface: #1a2029; --fg: #e3e7ee; --muted: #9aa5b5; --line: #2e3744;
+  --accent: #f0913a; --accent-soft: #33261a; color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+header { display: flex; flex-direction: column; gap: 8px; max-width: 70ch; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+h1 { font-size: 30px; line-height: 1.25; margin: 0; font-weight: 600; text-wrap: balance; }
+h2 { font-size: 21px; margin: 0; font-weight: 600; text-wrap: balance; }
+h3 { font-size: 16px; margin: 0; font-weight: 600; }
+p { margin: 0; max-width: 72ch; }
+.lede { color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 14px; }
+.diagram {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; overflow-x: auto;
+}
+.diagram pre.mermaid { margin: 0; min-width: 1100px; font-family: var(--font-body); background: transparent; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 13px; }
+.legend span { display: inline-flex; gap: 6px; align-items: baseline; }
+code, .mono { font-family: var(--font-mono); font-size: 13px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: none; }
+td.num { font-family: var(--font-mono); color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+td code { white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.card .tag { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.card p { color: var(--muted); font-size: 14px; }
+.note { background: var(--accent-soft); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">BlendHarness · 系统流程</div>
+    <h1>一次建模从指令到 result.json 的完整过程</h1>
+    <p class="lede">参照 Anthropic《How we built our multi-agent research system》里的 Process diagram 画法：纵向是参与者（生命线），横向箭头是按时间顺序的调用，loop / alt / opt 框表示循环、分支和可选步骤。第一张是一次建模（在线），第二张是从历史失败中学习教训（离线）。</p>
+  </header>
+
+  <section>
+    <h2>图 1 · 一次建模：workflow 外层编排，agent loop 内层自主</h2>
+    <div class="legend">
+      <span><b>→</b> 调用</span><span><b>⇢</b> 返回</span>
+      <span><b>loop</b> 循环</span><span><b>alt</b> 二选一</span><span><b>opt</b> 满足条件才执行</span>
+      <span>Critic / Verifier / Librarian 都是<b>单次 LLM 调用</b>，只有 Coder 在 agent loop 里多步工作</span>
+    </div>
+    <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor U as 用户 / CLI / 评测
+    box transparent 编排层 workflow
+        participant W as Workflow<br/>run_build · _Build
+    end
+    box transparent Agent 层
+        participant C as Coder<br/>AgentLoop
+        participant J as Critic · Verifier · Librarian<br/>单次 LLM 调用
+    end
+    box transparent core 通用机制
+        participant CE as Context Engine
+        participant R as Rails
+        participant M as LLM 模型
+        participant T as ToolRegistry
+    end
+    box transparent 工具与沙箱
+        participant BT as BlenderTools<br/>SkillTools
+        participant SB as Guard<br/>Blender 沙箱
+    end
+    box transparent 记忆与持久化
+        participant MEM as 长期记忆<br/>skills/ · lessons/
+        participant CK as Checkpoint<br/>Trace
+    end
+
+    U->>W: run_build(prompt, BuildConfig)
+    W->>CK: 新建 BuildState · 打开 run span（trace 根）
+    W->>MEM: 读教训（锁定 lesson_ids）+ 技能目录
+    MEM-->>W: 教训原文 · 每个技能一行“名字: 描述”
+    W->>C: make_coder：系统提示词 = coder.md + 教训 + 技能目录<br/>工具列表 → ToolRegistry（5 个工具，带权限档）
+
+    Note over W,CK: round 0：建模 + 开放式评审
+    W->>C: coder.run(用户指令)　messages = [system, user]
+    loop 每一步（最多 max_steps 步）
+        C->>CE: messages（完整历史）
+        CE-->>C: view：省略旧脚本 · 钉住当前脚本 · 预算守卫
+        C->>M: chat(view, tools = schemas)
+        M-->>C: LLMResponse：文本 或 tool_calls
+        C->>R: after_llm：回答被截断了吗
+        alt 没有工具调用（模型说“我做完了”）
+            C->>R: on_final_answer：CompletionRail 核实
+            R-->>C: 放行则结束 done · Nudge 提醒再给一步 · Stop 结束
+        else 有工具调用
+            C->>T: execute(ToolCall)
+            T->>BT: 按名字找到 Tool → tool.fn(**arguments)
+            opt load_skill
+                BT->>MEM: 读技能 → 加进 loaded，返回函数签名
+            end
+            BT->>SB: guard 静态检查 → 拼上技能代码 → 空场景执行
+            SB-->>BT: ExecResult（看门狗处理超时与崩溃）
+            BT-->>T: ToolResult（执行成功才更新 current_script）
+            T-->>C: tool 消息：错误即观察 · 超长截断 · 记 tool span
+            C->>R: after_tool / after_step：同错 3 次？超预算？
+        end
+    end
+    C-->>W: LoopResult(status, steps, cost)
+    W->>BT: render() + inspect_scene()
+    W->>J: Critic：渲染图 + 场景文本，问“有什么问题”
+    J-->>W: approved 或 issues → open_issues · feedback
+    W->>CK: 存档 000_round0.json
+
+    loop 修改轮 k = 1 … rounds（还没通过时）
+        W->>BT: snapshot()：修改前的结构快照
+        W->>C: coder.run(修改任务 = 原指令 + feedback)<br/>新的 messages，Pin 钉住当前脚本
+        Note over C,SB: 同一个 agent loop（步骤 7 – 21）
+        C-->>W: LoopResult
+        W->>BT: render() + snapshot() → diff_snapshots
+        W->>J: Verifier：前后渲染图 + diff，逐条核实（diff 为空则不调 LLM）
+        J-->>W: FIXED / PARTIAL / NOT_FIXED + 回归问题，只留下没修好的
+        W->>CK: 存档 00k_roundk.json
+    end
+
+    opt 通过了 且 learn_skills
+        W->>J: Librarian：从最终脚本提炼候选技能
+        J-->>W: 最多 3 个候选
+        W->>SB: 准入关卡：静态 → 去重 → 沙箱试跑 → 结构 + 视觉评审
+        W->>MEM: 写入技能库（被拒的有一次修复机会）
+        W->>CK: 存档 learned
+    end
+
+    W->>MEM: 已加载技能的使用统计 +1
+    W->>CK: final_script.py · result.json · trace.jsonl
+    W-->>U: result：是否通过 · 轮数 · 成本
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>图 1 的分段说明</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>步骤</th><th>阶段</th><th>发生了什么</th><th>代码</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1–2</td><td>启动</td><td>用户指令和配置进入 workflow；创建 BuildState（纯 JSON 的流程状态），打开 trace 的根节点。</td><td><code>workflow/build.py · run_build</code></td></tr>
+          <tr><td class="num">3–5</td><td>长期记忆·读<br>工具注册</td><td>教训全部注入系统提示词并锁定 id；技能只放目录（渐进式披露第 1 层）。4 个 Blender 工具 + load_skill 包成 ToolRegistry。</td><td><code>_Build.__init__ · agents/coder.py · make_coder</code></td></tr>
+          <tr><td class="num">6</td><td>进入 agent loop</td><td>短期记忆从零开始：messages 只有系统提示词和任务两条。</td><td><code>core/runtime/loop.py · AgentLoop.run</code></td></tr>
+          <tr><td class="num">7–8</td><td>上下文管理</td><td>每次调模型前，把完整历史加工成模型看到的 view；完整历史本身不改。</td><td><code>core/context_engine · ContextEngine</code></td></tr>
+          <tr><td class="num">9–10</td><td>调模型</td><td>view 和工具说明一起发给 API（工具说明在单独的 tools 字段）；重试、流式、成本在 LLMClient 里。</td><td><code>core/llm/client.py · LLMClient.chat</code></td></tr>
+          <tr><td class="num">11–13</td><td>Rails</td><td>截断检查；模型说做完了时，CompletionRail 要求至少有一个脚本成功执行过。</td><td><code>core/rails/truncation.py · completion.py</code></td></tr>
+          <tr><td class="num">14–15</td><td>工具执行</td><td>注册表按名字查表、调用绑定方法；任何出错都变成模型能读的消息。</td><td><code>core/tools/registry.py · execute</code></td></tr>
+          <tr><td class="num">16</td><td>长期记忆·读</td><td>load_skill 把技能名加进 loaded（第 2 层），之后每次执行自动拼接技能代码（第 3 层）。</td><td><code>tools/skill_tools.py · load_skill · preamble</code></td></tr>
+          <tr><td class="num">17–19</td><td>沙箱</td><td>ast 静态检查拦危险代码；Blender 子进程每次从空场景执行；超时或崩溃由看门狗重启；成功才更新当前脚本。</td><td><code>sandbox/guard.py · sandbox/session.py · tools/blender_tools.py</code></td></tr>
+          <tr><td class="num">20–21</td><td>结果回传 + Rails</td><td>工具结果作为 tool 消息回到 messages；StuckRail 看同一个错误是否出现 3 次，CostBudgetRail 看是否超预算。Stop 会给没执行的调用补 SKIPPED。</td><td><code>core/rails/stuck.py · budget.py</code></td></tr>
+          <tr><td class="num">22–25</td><td>开放式评审</td><td>渲染多个视角，Critic 结合图和场景文本找问题；问题写进 BuildState。</td><td><code>agents/critic.py · tools/render.py</code></td></tr>
+          <tr><td class="num">26</td><td>存档</td><td>先把工具世界（当前脚本、执行历史、已加载技能）同步进 state，再原子写入。</td><td><code>_Build.save · core/session/checkpoint.py</code></td></tr>
+          <tr><td class="num">27–33</td><td>修改轮</td><td>新的 messages，只带入没修好的问题和当前脚本；Verifier 用前后对比和结构 diff 做封闭式核实。</td><td><code>_Build.revise · agents/verifier.py · tools/scene.py</code></td></tr>
+          <tr><td class="num">34–38</td><td>长期记忆·写</td><td>Librarian 提炼技能，按从便宜到贵的顺序过 4 道关卡，失败的修复一次。</td><td><code>workflow/learning/learn.py · admission.py</code></td></tr>
+          <tr><td class="num">39–41</td><td>收尾</td><td>技能使用统计、可单独运行的最终脚本、result.json；trace.jsonl 里有全部 span。</td><td><code>_Build.finalize</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede">步骤编号以图中自动编号为准；修改轮里的 agent loop 和第 7–21 步完全相同，图里没有重复画出。</p>
+  </section>
+
+  <section>
+    <h2>图 2 · 离线自进化：从失败中学教训，由评测把关</h2>
+    <p class="lede">教训学习不在建模流程里。它读的是历史上所有建模留下的 trace，学到的教训只有通过 A/B 关卡，才会在下一次建模中默认启用。</p>
+    <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant TR as 历史运行<br/>trace.jsonl · result.json
+    participant AN as analysis/<br/>轨迹 · 指标 · 分类
+    participant RF as Reflector
+    participant G as 教训关卡
+    participant L as lessons/<br/>教训库
+    participant EV as 评测<br/>run_eval · compare
+    participant B as 下一次 run_build
+
+    AN->>TR: load_trajectory：每轮 Coder、工具调用、每个问题的生命周期
+    AN->>AN: 过程指标 + 按根因分类（LLM 标注，结果缓存）
+    Note over AN: 发现：空间问题占 72%，相对位置和比例只修好 43–45%
+    AN->>RF: 某一类失败的全部案例：问题 · 建议修法 · Verifier 理由
+    RF-->>G: 2–5 条候选教训，附引用的案例编号
+    G->>G: 静态 → 通用性（来自至少 2 道题，按编号自己核对）→ 去重
+    G->>L: 写入教训库（9 条）
+    L->>EV: 开跑时快照冻结 · 无教训 / 有教训 / 安慰剂 交错运行
+    EV->>EV: 按题配对 + bootstrap 置信区间，按预先注册的规则判定
+    alt 置信区间完全在 0 以下
+        EV-->>B: 默认启用 lessons_dir
+    else 跨过 0（本次结果）
+        EV-->>B: 不启用：评测关卡拒绝了这次进化
+    end
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>图里的五层防护</h2>
+    <div class="grid">
+      <div class="card"><div class="tag">步骤 17 · sandbox/guard.py</div><h3>沙箱静态检查</h3><p>执行前用 ast 拦截 os、open、eval 和逃逸写法。拦下后错误交还模型，运行继续。</p></div>
+      <div class="card"><div class="tag">步骤 11–13、21 · core/rails</div><h3>Rails</h3><p>截断、假装完成、同错重复、超预算。Nudge 提醒再给一步，Stop 结束运行。</p></div>
+      <div class="card"><div class="tag">步骤 8 · BudgetGuard</div><h3>上下文预算守卫</h3><p>超过 10 万 token 时从最旧的大段内容开始缩，不删消息，保持工具调用和结果成对。</p></div>
+      <div class="card"><div class="tag">步骤 18 · sandbox/session.py</div><h3>看门狗</h3><p>Blender 死循环或崩溃时杀掉进程重启，返回一条错误消息。</p></div>
+      <div class="card"><div class="tag">步骤 36 · 图 2 步骤 5</div><h3>准入关卡</h3><p>技能和教训写进长期记忆之前都要过关，按从便宜到贵的顺序检查。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>三种状态分别在哪</h2>
+    <div class="grid">
+      <div class="card"><div class="tag">messages · 一次 run</div><h3>对话状态（短期记忆）</h3><p>每次 coder.run 从零开始，结束就丢弃。模型看到的是它经 Context Engine 加工后的 view。</p></div>
+      <div class="card"><div class="tag">BlenderTools · SkillTools 的属性</div><h3>工具世界状态</h3><p>current_script、执行历史、已加载技能。跨轮次保留，存档时同步进 BuildState。</p></div>
+      <div class="card"><div class="tag">BuildState · checkpoints/</div><h3>流程状态</h3><p>完成到第几轮、还没修好的问题、锁定的教训。纯 JSON，可以续跑和分叉。</p></div>
+    </div>
+    <p class="note">长期记忆（skills/、lessons/）在磁盘上，跨建模保留：读在启动和 load_skill 时（步骤 3、16），写在通过后的学习阶段和离线的 reflect.py（步骤 34–38、图 2）。</p>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad: true, theme: (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default"), sequence: {mirrorActors: true, actorFontSize: 15, messageFontSize: 15, noteFontSize: 14}});</script>
+</body>
+</html>

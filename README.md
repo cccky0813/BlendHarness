@@ -85,6 +85,24 @@ Layering is one-way (`core` ← `sandbox`, `memory` ← `tools` ← `agents` ←
 
 Design principles: **mechanism vs. policy** (the loop runs, rails decide), **framework vs. configuration** (one loop, agents are configs), **dependency inversion** (`BlenderTools` only knows a generic `preamble_provider`, not skills), **cheap before expensive** (deterministic checks before vision models), and **fail-safe** (critics and gates reject when in doubt).
 
+## How one build runs
+
+Two nested loops: an outer **workflow** written in code (build → critique → revise → verify → learn, with a checkpoint after every phase) and an inner **agent loop** in which the model decides each next step. Only the Coder runs in the agent loop; the Critic, Verifier and Librarian are single calls.
+
+**A · Workflow (outer, decided by code)**
+
+![Workflow sequence: run_build drives the Coder, Critic, Verifier and Librarian and checkpoints after every phase](docs/diagrams/workflow.en.png)
+
+**B · Agent loop (inner, decided by the model)**: what happens inside every `coder.run(...)`
+
+![Agent loop sequence: context engine, LLM call, rails, tool registry, sandbox guard and skills in one step](docs/diagrams/agent_loop.en.png)
+
+**C · Learning lessons from failures (offline, gated by evaluation)**
+
+![Lesson loop: traces, analysis, Reflector, gates, lesson library and the A/B evaluation gate](docs/diagrams/lessons_loop.en.png)
+
+Diagram sources are in [`docs/diagrams/`](docs/diagrams/) (Mermaid); `python scripts/render_diagrams.py` re-renders them with headless Chrome.
+
 ## Results
 
 All numbers come from the eval harness and were measured before the October 2026 restructuring (commit `e46c5ab`); the restructuring kept behaviour identical, checked by unchanged tests, character-identical prompts and a differential test of the context policy. The coder is Claude Sonnet with `reasoning_effort: low`, and the critic, verifier and skill review use Claude Haiku. Each condition ran **twice**, so treat small differences as noise.
@@ -174,12 +192,12 @@ blendharness/
   workflow/    build.py  state.py  learning/admission.py  learning/learn.py  learning/lessons.py
   protocol/    mcp_server.py
 eval/          run_eval.py  report.py  compare.py  analyze.py  tasks*.json  placebo_lessons/
-scripts/       run_build.py  reflect.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
+scripts/       run_build.py  render_diagrams.py  reflect.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
 tests/         unit/  integration/  fakes.py
 skills/        learned skill library
 lessons/       learned lessons (not enabled by default: they did not pass the A/B gate)
 config/        prices.json
-docs/          architecture.md  mcp.md  roadmap.md  images
+docs/          architecture.md  mcp.md  roadmap.md  diagrams/ (Mermaid sources + PNG)  images
 ```
 
 ## Limitations and roadmap
