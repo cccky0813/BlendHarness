@@ -20,6 +20,10 @@ def diff_snapshots(before: dict, after: dict, tol: float = 1e-4) -> dict:
                 delta[key] = f"{b[name][key]} -> {a[name][key]}"
         if b[name]["material_names"] != a[name]["material_names"]:
             delta["materials"] = f"{b[name]['material_names']} -> {a[name]['material_names']}"
+        elif b[name].get("material_colors") != a[name].get("material_colors"):
+            # Same material, new color: a recolor in place must count as a change, or the Verifier's free
+            # "scene unchanged" pre-check fails a real fix without looking (found in the first real session).
+            delta["material_colors"] = f"{b[name].get('material_colors')} -> {a[name].get('material_colors')}"
         if b[name]["vertex_count"] != a[name]["vertex_count"]:
             delta["vertices"] = f"{b[name]['vertex_count']} -> {a[name]['vertex_count']}"
         if delta:

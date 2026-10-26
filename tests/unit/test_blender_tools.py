@@ -125,3 +125,9 @@ def test_diff_snapshots():
     assert [c["name"] for c in d["changed"]] == ["Leg", "Seat"]
     assert "location" in d["changed"][1] and "materials" in d["changed"][0]
     assert diff_snapshots({"error": "x"}, after) == {"error": "x"}
+
+
+def test_diff_sees_a_recolor_of_the_same_material():
+    roof = lambda color: {**obj("Roof", mats=["Clay"]), "material_colors": [color]}   # noqa: E731
+    d = diff_snapshots({"objects": [roof([0.8, 0.5, 0.5])]}, {"objects": [roof([0.55, 0.15, 0.08])]})
+    assert d["changed"] == [{"name": "Roof", "material_colors": "[[0.8, 0.5, 0.5]] -> [[0.55, 0.15, 0.08]]"}]
