@@ -79,6 +79,16 @@ def test_inspect_scene_locates_geometry_built_in_mesh_coordinates(session, tmp_p
     assert "center=[2.1, 0.05, 1.15]" in line and "origin=[0.0, 0.0, 0.0]" in line and "z=1.0..1.3" in line
 
 
+def test_snapshot_reports_material_base_colors(session, tmp_path):
+    blender = BlenderTools(session, tmp_path)
+    code = CUBE + ("m = bpy.data.materials.new('Roof_Red'); m.use_nodes = True\n"
+                   "m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.8, 0.05, 0.03, 1)\n"
+                   "bpy.data.objects['Box'].data.materials.append(m)\n")
+    assert not blender.execute_bpy(code).is_error
+    box = blender.snapshot()["objects"][0]
+    assert box["material_names"] == ["Roof_Red"] and box["material_colors"] == [[0.8, 0.05, 0.03]]
+
+
 def test_mcp_client_builds_and_sees_renders(session, tmp_path):
     """End to end: an MCP client builds a model in the real Blender and receives the renders as images."""
     pytest.importorskip("mcp")

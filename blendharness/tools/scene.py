@@ -50,6 +50,15 @@ def _bbox(o):
     lo = _V((min(p.x for p in c), min(p.y for p in c), min(p.z for p in c)))
     hi = _V((max(p.x for p in c), max(p.y for p in c), max(p.z for p in c)))
     return {{"min": _r(lo), "max": _r(hi), "size": _r(hi - lo)}}
+def _color(m):
+    # Linear RGB of the material's base color, or None when a texture or node drives it (not a plain color).
+    if m.use_nodes and m.node_tree:
+        for n in m.node_tree.nodes:
+            if n.type == 'BSDF_PRINCIPLED':
+                i = n.inputs.get('Base Color')
+                return None if i is None or i.is_linked else _r(list(i.default_value)[:3])
+        return None
+    return _r(list(m.diffuse_color)[:3])
 _objs = []
 for _o in _bpy.context.scene.objects:
     _mesh = _o.type == 'MESH' and _o.data is not None
@@ -59,6 +68,7 @@ for _o in _bpy.context.scene.objects:
         "bbox": _bbox(_o) if _mesh else None,
         "vertex_count": len(_o.data.vertices) if _mesh else 0,
         "material_names": [s.material.name for s in _o.material_slots if s.material],
+        "material_colors": [_color(s.material) for s in _o.material_slots if s.material],
     }})
 _objs.sort(key=lambda x: x["name"])
 print("{SCENE_PREFIX}" + _json.dumps({{"summary": {{

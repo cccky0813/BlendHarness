@@ -1,0 +1,342 @@
+{
+ "version": "draft-2026-10-26",
+ "notes": [
+  "Draft for review. Name patterns are case-insensitive regexes over object names (Coder-chosen names are meaningful in practice).",
+  "Axes: +x = east, +y = north, z up; ground at z = 0. Distances in metres.",
+  "touches: object-name patterns this turn may add/change/remove; any other object changing is a regression. '*' = anything (turn 1).",
+  "persist: checks that must keep holding in every later turn (requirement retention).",
+  "requires: ids of earlier checks this turn depends on; if one fails, the turn still runs but is scored as 'precondition failed'.",
+  "refs: ground truth for references in the request (coreference), used to score reference resolution.",
+  "rubric: atomic yes/no questions for the LLM judge (DSG style); 'dep' = parent question; P* = preservation questions. Not visible to the system."
+ ],
+ "sessions": [
+  {
+   "id": "village",
+   "theme": "low-poly game scene",
+   "turns": [
+    {
+     "request": "Build a low-poly village on a 10 m x 10 m grass ground: a small cottage (walls, a pitched roof, a door and two windows), a stone well, and two trees.",
+     "expect": [
+      {"id": "v1_house", "exists": "cottage|house|wall"},
+      {"id": "v1_roof", "exists": "roof"},
+      {"id": "v1_door", "exists": "door"},
+      {"id": "v1_windows", "count": "window", "min": 2},
+      {"id": "v1_well", "exists": "well"},
+      {"id": "v1_trees", "count": "tree|trunk", "min": 2},
+      {"id": "v1_ground", "exists": "ground|grass|terrain"}
+     ],
+     "touches": ["*"],
+     "persist": ["v1_house", "v1_well", "v1_ground"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a small cottage with walls and a pitched roof?"},
+      {"id": "Q2", "q": "Does the cottage have a visible door and two windows?", "dep": "Q1"},
+      {"id": "Q3", "q": "Is there a stone well?"},
+      {"id": "Q4", "q": "Are there two trees?"},
+      {"id": "Q5", "q": "Do all objects stand on the grass, with nothing floating or sunk?"},
+      {"id": "Q6", "q": "Is the style consistently low-poly?"}
+     ]
+    },
+    {
+     "request": "Add a small vegetable garden about 3 m east of the cottage, enclosed by a wooden fence, with three rows of vegetables inside.",
+     "expect": [
+      {"id": "v2_garden", "exists": "garden|vegetable|crop|plant"},
+      {"id": "v2_fence", "exists": "fence"},
+      {"id": "v2_east", "direction": ["fence|garden", "cottage|house"], "dir": "east", "min": 1.5, "max": 5.0},
+      {"id": "v2_rows", "count": "vegetable|crop|cabbage|carrot|lettuce|plant|row", "min": 3}
+     ],
+     "touches": ["garden|vegetable|crop|plant|fence|row|cabbage|carrot|lettuce|soil|bed"],
+     "persist": ["v2_garden"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a vegetable garden east of the cottage?"},
+      {"id": "Q2", "q": "Is the garden enclosed by a wooden fence?", "dep": "Q1"},
+      {"id": "Q3", "q": "Are there three rows of vegetables inside the fence?", "dep": "Q1"},
+      {"id": "Q4", "q": "Is the garden roughly 3 m away from the cottage, not touching it?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the cottage, well and trees unchanged from before?"}
+     ]
+    },
+    {
+     "request": "Make the cottage roof red, like clay tiles.",
+     "expect": [
+      {"id": "v3_red_roof", "material_hue": "roof", "hue": "red"}
+     ],
+     "touches": ["roof|tile"],
+     "persist": ["v3_red_roof"],
+     "rubric": [
+      {"id": "Q1", "q": "Is the cottage roof red?"},
+      {"id": "Q2", "q": "Does the roof keep its pitched shape?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the walls, door, windows, garden, well and trees unchanged?"}
+     ]
+    },
+    {
+     "request": "Add a gravel path from the cottage door to the well.",
+     "expect": [
+      {"id": "v4_path", "exists": "path|gravel|stone_path|walkway"},
+      {"id": "v4_path_door", "near": ["path|gravel|walkway", "door"], "max_gap": 0.6},
+      {"id": "v4_path_well", "near": ["path|gravel|walkway", "well"], "max_gap": 0.6},
+      {"id": "v4_path_ground", "grounded": "path|gravel|walkway"}
+     ],
+     "requires": ["v1_door", "v1_well"],
+     "touches": ["path|gravel|walkway|pebble|stone(?!.*well)"],
+     "persist": ["v4_path"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a gravel path on the ground?"},
+      {"id": "Q2", "q": "Does the path start at the cottage door?", "dep": "Q1"},
+      {"id": "Q3", "q": "Does the path end at the well?", "dep": "Q1"},
+      {"id": "Q4", "q": "Does the path lie flat on the grass (not floating, not cutting through objects)?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the cottage (with its red roof), garden, well and trees unchanged?"}
+     ]
+    },
+    {
+     "request": "Remove the fence around the garden, but keep the vegetables.",
+     "expect": [
+      {"id": "v5_no_fence", "absent": "fence"},
+      {"id": "v5_veg_kept", "count": "vegetable|crop|cabbage|carrot|lettuce|plant|row", "min": 3}
+     ],
+     "requires": ["v2_fence"],
+     "touches": ["fence|post|rail|picket"],
+     "persist": ["v5_no_fence"],
+     "rubric": [
+      {"id": "Q1", "q": "Is the garden fence gone?"},
+      {"id": "Q2", "q": "Are the three rows of vegetables still there?"},
+      {"id": "P1", "q": "Are the cottage, red roof, path, well and trees unchanged?"}
+     ]
+    },
+    {
+     "request": "Put a wooden bucket next to the well, touching its outer wall.",
+     "expect": [
+      {"id": "v6_bucket", "exists": "bucket|barrel|pail"},
+      {"id": "v6_touch_well", "near": ["bucket|barrel|pail", "well"], "max_gap": 0.05},
+      {"id": "v6_grounded", "grounded": "bucket|barrel|pail"}
+     ],
+     "requires": ["v1_well"],
+     "touches": ["bucket|barrel|pail"],
+     "persist": ["v6_touch_well"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a wooden bucket?"},
+      {"id": "Q2", "q": "Is the bucket touching the outside of the well (not inside it, not floating)?", "dep": "Q1"},
+      {"id": "Q3", "q": "Is the bucket's size reasonable next to the well?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the cottage, path, vegetables and trees unchanged, and is the fence still gone?"}
+     ]
+    }
+   ]
+  },
+  {
+   "id": "bedroom",
+   "theme": "room interior",
+   "turns": [
+    {
+     "request": "Build a bedroom corner: a wooden floor, two walls meeting at a right angle, and a double bed with its headboard against the back wall.",
+     "expect": [
+      {"id": "b1_floor", "exists": "floor"},
+      {"id": "b1_walls", "count": "wall", "min": 2},
+      {"id": "b1_bed", "exists": "bed|mattress|headboard"},
+      {"id": "b1_headboard_wall", "near": ["headboard", "wall"], "max_gap": 0.1}
+     ],
+     "touches": ["*"],
+     "persist": ["b1_bed", "b1_headboard_wall"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a wooden floor with two walls meeting at a right angle?"},
+      {"id": "Q2", "q": "Is there a double bed?"},
+      {"id": "Q3", "q": "Is the bed's headboard against the back wall?", "dep": "Q2"},
+      {"id": "Q4", "q": "Is the bed resting on the floor, not floating or sunk?", "dep": "Q2"}
+     ]
+    },
+    {
+     "request": "Add two matching nightstands on both sides of the bed, each with a small table lamp on top.",
+     "expect": [
+      {"id": "b2_stands", "count": "nightstand|night_stand|bedside", "min": 2},
+      {"id": "b2_lamps", "count": "lamp", "min": 2},
+      {"id": "b2_lamp_on_stand", "on": ["lamp", "nightstand|night_stand|bedside"]}
+     ],
+     "requires": ["b1_bed"],
+     "touches": ["nightstand|night_stand|bedside|lamp|shade|bulb|drawer|knob|handle"],
+     "persist": ["b2_stands", "b2_lamp_on_stand"],
+     "rubric": [
+      {"id": "Q1", "q": "Are there two nightstands, one on each side of the bed?"},
+      {"id": "Q2", "q": "Do the two nightstands look the same?", "dep": "Q1"},
+      {"id": "Q3", "q": "Is there a lamp on top of each nightstand?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bed, floor and walls unchanged?"}
+     ]
+    },
+    {
+     "request": "Hang a large framed painting on the wall above the bed, centred over the headboard.",
+     "expect": [
+      {"id": "b3_painting", "exists": "painting|picture|frame|canvas|art"},
+      {"id": "b3_on_wall", "near": ["painting|picture|frame|canvas|art", "wall"], "max_gap": 0.05},
+      {"id": "b3_above_bed", "above": ["painting|picture|frame|canvas|art", "headboard"]}
+     ],
+     "requires": ["b1_headboard_wall"],
+     "touches": ["painting|picture|frame|canvas|art"],
+     "persist": ["b3_on_wall"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a framed painting on the wall?"},
+      {"id": "Q2", "q": "Is the painting above the bed and centred over the headboard?", "dep": "Q1"},
+      {"id": "Q3", "q": "Is it flat against the wall, not floating away from it or sunk into it?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bed, nightstands and lamps unchanged?"}
+     ]
+    },
+    {
+     "request": "Put a rug under the bed that sticks out about half a metre on both sides.",
+     "expect": [
+      {"id": "b4_rug", "exists": "rug|carpet"},
+      {"id": "b4_rug_flat", "grounded": "rug|carpet"},
+      {"id": "b4_rug_under_bed", "contains_xy": ["rug|carpet", "bed|mattress"]}
+     ],
+     "touches": ["rug|carpet"],
+     "persist": ["b4_rug"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a rug on the floor?"},
+      {"id": "Q2", "q": "Is the rug under the bed and visible on both sides of it?", "dep": "Q1"},
+      {"id": "Q3", "q": "Does the rug lie flat on the floor without cutting through the bed or nightstands?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bed, nightstands, lamps and painting unchanged?"}
+     ]
+    },
+    {
+     "request": "Make the lamp on the left nightstand a bit taller and change both lampshades to warm yellow.",
+     "refs": {"the lamp on the left nightstand": "lamp"},
+     "expect": [
+      {"id": "b5_shades_yellow", "material_hue": "shade|lamp", "hue": "yellow"}
+     ],
+     "requires": ["b2_lamps"],
+     "touches": ["lamp|shade|bulb|base|stem|pole"],
+     "persist": ["b5_shades_yellow"],
+     "rubric": [
+      {"id": "Q1", "q": "Is one lamp now visibly taller than the other?"},
+      {"id": "Q2", "q": "Is the taller lamp the one on the left nightstand (as seen facing the bed)?", "dep": "Q1"},
+      {"id": "Q3", "q": "Are both lampshades warm yellow?"},
+      {"id": "Q4", "q": "Do both lamps still stand on their nightstands?"},
+      {"id": "P1", "q": "Are the bed, nightstands, painting and rug unchanged?"}
+     ]
+    },
+    {
+     "request": "Swap the painting for a round mirror of about the same width.",
+     "refs": {"the painting": "painting|picture|frame|canvas|art"},
+     "expect": [
+      {"id": "b6_mirror", "exists": "mirror"},
+      {"id": "b6_no_painting", "absent": "painting|canvas"},
+      {"id": "b6_mirror_wall", "near": ["mirror", "wall"], "max_gap": 0.05},
+      {"id": "b6_above_bed", "above": ["mirror", "headboard"]}
+     ],
+     "requires": ["b3_painting"],
+     "touches": ["painting|picture|frame|canvas|art|mirror|glass"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a round mirror on the wall above the bed?"},
+      {"id": "Q2", "q": "Is the painting gone?"},
+      {"id": "Q3", "q": "Is the mirror about as wide as the painting was and centred over the headboard?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bed, nightstands, yellow lampshades and rug unchanged?"}
+     ]
+    }
+   ]
+  },
+  {
+   "id": "street_corner",
+   "theme": "urban street corner",
+   "turns": [
+    {
+     "request": "Build a street corner: an L-shaped sidewalk with a curb around a road intersection, and a streetlight at the corner of the sidewalk.",
+     "expect": [
+      {"id": "s1_sidewalk", "exists": "sidewalk|pavement"},
+      {"id": "s1_road", "exists": "road|street|asphalt"},
+      {"id": "s1_curb", "exists": "curb|kerb"},
+      {"id": "s1_light", "exists": "streetlight|street_light|lamp|light_pole|lamppost"}
+     ],
+     "touches": ["*"],
+     "persist": ["s1_sidewalk", "s1_road", "s1_light"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there an L-shaped sidewalk around a road intersection?"},
+      {"id": "Q2", "q": "Is there a curb between the sidewalk and the road?", "dep": "Q1"},
+      {"id": "Q3", "q": "Is there a streetlight at the corner of the sidewalk?"},
+      {"id": "Q4", "q": "Is the sidewalk raised slightly above the road?", "dep": "Q1"}
+     ]
+    },
+    {
+     "request": "Add a bus stop on the longer side of the sidewalk: a shelter with a roof, a glass back panel and a bench inside.",
+     "expect": [
+      {"id": "s2_shelter", "exists": "shelter|bus_stop|busstop"},
+      {"id": "s2_bench", "exists": "bench|seat"},
+      {"id": "s2_glass", "exists": "glass|panel"},
+      {"id": "s2_on_sidewalk", "on": ["shelter|bus_stop|busstop|post|pillar", "sidewalk|pavement"]}
+     ],
+     "requires": ["s1_sidewalk"],
+     "touches": ["shelter|bus|stop|bench|seat|glass|panel|roof|post|pillar|sign"],
+     "persist": ["s2_shelter", "s2_on_sidewalk"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a bus shelter on the sidewalk?"},
+      {"id": "Q2", "q": "Does the shelter have a roof and a glass back panel?", "dep": "Q1"},
+      {"id": "Q3", "q": "Is there a bench inside the shelter?", "dep": "Q1"},
+      {"id": "Q4", "q": "Is the shelter on the longer side of the sidewalk and not blocking the road?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the road, curb, sidewalk and streetlight unchanged?"}
+     ]
+    },
+    {
+     "request": "Put three young trees in round planters along the shorter side of the sidewalk, evenly spaced.",
+     "expect": [
+      {"id": "s3_trees", "count": "tree|trunk", "min": 3},
+      {"id": "s3_planters", "count": "planter|pot", "min": 3},
+      {"id": "s3_spacing", "evenly_spaced": "planter|pot", "tolerance": 0.2}
+     ],
+     "requires": ["s1_sidewalk"],
+     "touches": ["tree|trunk|foliage|leaves|canopy|planter|pot|soil"],
+     "persist": ["s3_planters"],
+     "rubric": [
+      {"id": "Q1", "q": "Are there three young trees in round planters?"},
+      {"id": "Q2", "q": "Are they along the shorter side of the sidewalk?", "dep": "Q1"},
+      {"id": "Q3", "q": "Are they evenly spaced?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bus shelter, streetlight, road and sidewalk unchanged?"}
+     ]
+    },
+    {
+     "request": "Add a zebra crossing across the road in front of the bus stop.",
+     "expect": [
+      {"id": "s4_crossing", "count": "zebra|crossing|stripe", "min": 4},
+      {"id": "s4_on_road", "on": ["zebra|crossing|stripe", "road|street|asphalt"]}
+     ],
+     "requires": ["s2_shelter"],
+     "touches": ["zebra|crossing|stripe|marking"],
+     "persist": ["s4_crossing"],
+     "rubric": [
+      {"id": "Q1", "q": "Are there white zebra-crossing stripes on the road?"},
+      {"id": "Q2", "q": "Is the crossing in front of the bus stop?", "dep": "Q1"},
+      {"id": "Q3", "q": "Do the stripes lie flat on the road surface (not floating, not hidden under it)?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bus shelter, trees, streetlight and sidewalk unchanged?"}
+     ]
+    },
+    {
+     "request": "Move the streetlight so it stands next to the zebra crossing instead of at the corner.",
+     "refs": {"the streetlight": "streetlight|street_light|lamp|light_pole|lamppost"},
+     "expect": [
+      {"id": "s5_light_near_crossing", "near": ["streetlight|street_light|lamp|light_pole|lamppost", "zebra|crossing|stripe"], "max_gap": 1.5},
+      {"id": "s5_light_on_sidewalk", "on": ["streetlight|street_light|light_pole|lamppost|pole", "sidewalk|pavement"]}
+     ],
+     "requires": ["s1_light", "s4_crossing"],
+     "touches": ["streetlight|street_light|lamp|light_pole|lamppost|pole|bulb|head"],
+     "persist": ["s5_light_on_sidewalk"],
+     "rubric": [
+      {"id": "Q1", "q": "Is the streetlight next to the zebra crossing now?"},
+      {"id": "Q2", "q": "Is there no longer a streetlight at the sidewalk corner?"},
+      {"id": "Q3", "q": "Does the streetlight still stand on the sidewalk, not on the road?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bus shelter, trees, crossing and sidewalk unchanged?"}
+     ]
+    },
+    {
+     "request": "Replace the middle tree with a red fire hydrant, keeping the other two trees where they are.",
+     "refs": {"the middle tree": "tree|trunk|planter"},
+     "expect": [
+      {"id": "s6_hydrant", "exists": "hydrant"},
+      {"id": "s6_red", "material_hue": "hydrant", "hue": "red"},
+      {"id": "s6_two_planters", "count": "planter|pot", "min": 2, "max": 2},
+      {"id": "s6_hydrant_on_sidewalk", "on": ["hydrant", "sidewalk|pavement"]}
+     ],
+     "requires": ["s3_planters"],
+     "touches": ["hydrant|tree|trunk|foliage|leaves|canopy|planter|pot|soil|cap|nozzle|valve"],
+     "rubric": [
+      {"id": "Q1", "q": "Is there a red fire hydrant where the middle tree was?"},
+      {"id": "Q2", "q": "Are the other two trees still in their original places?"},
+      {"id": "Q3", "q": "Does the hydrant stand on the sidewalk?", "dep": "Q1"},
+      {"id": "P1", "q": "Are the bus shelter, crossing, moved streetlight and road unchanged?"}
+     ]
+    }
+   ]
+  }
+ ]
+}
