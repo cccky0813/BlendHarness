@@ -30,6 +30,7 @@ class BuildState:
     forked_from: str = ""                        # "<run dir>@<checkpoint label>" if this build is a fork
     review: str = ""                             # what the Critic and Verifier judge against ("" = the prompt);
                                                  # a session turn sets it to the turn request + earlier ones
+    focus: list[str] = field(default_factory=list)           # script_view "outline": sections shown in full
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

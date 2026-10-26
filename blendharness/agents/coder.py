@@ -5,6 +5,7 @@ from blendharness.core.context_engine import (BudgetGuard, ContextEngine, OmitLa
                                               Pin, tool_result_for)
 from blendharness.core.llm import LLMClient
 from blendharness.core.runtime import AgentLoop
+from blendharness.memory.session.sections import find_section, render_outline, split_sections
 from blendharness.tools.blender_tools import BlenderTools
 from blendharness.tools.skill_tools import SkillTools
 
@@ -55,6 +56,24 @@ PIN_HEADER = ("CURRENT WORKING SCRIPT (always up to date; this is the text edit_
               "loaded skills are prepended automatically when it runs):\n")
 
 
+OUTLINE_HEADER = ("CURRENT WORKING SCRIPT, as an outline (always up to date; load any other section with "
+                  "view_section; loaded skills are prepended automatically when it runs):\n")
+
+
+def script_pin(blender: BlenderTools) -> str | None:
+    """The pinned view of the working script: in full, or (script_view "outline") the outline plus the focus
+    sections, re-split from the current text so they are never stale."""
+    if not blender.current_script:
+        return None
+    if getattr(blender, "script_view", "full") != "outline":
+        return f"{PIN_HEADER}```python\n{blender.current_script}\n```"
+    sections = split_sections(blender.current_script)
+    shown = {s.name: s for s in (find_section(sections, n) for n in blender.focus) if s is not None}
+    body = "\n\n".join(f"# --- section {s.name!r}, lines {s.start}-{s.end}\n{s.text}" for s in shown.values())
+    return (f"{OUTLINE_HEADER}{render_outline(sections)}\n\nSections most relevant to the request (exact text):\n"
+            f"```python\n{body or '# (none retrieved: use view_section)'}\n```")
+
+
 def make_coder_context(blender: BlenderTools, max_tokens: int = 100_000) -> ContextEngine:
     """Context pipeline (M3 v2):
     1. every script copy in the history becomes a placeholder, except the latest FAILED one (to be fixed);
@@ -67,7 +86,7 @@ def make_coder_context(blender: BlenderTools, max_tokens: int = 100_000) -> Cont
     return ContextEngine([
         OmitLargeToolArgs(keep_last=0, keep=lambda msgs, tc: tc["id"] == _latest_failed_script(msgs)),
         OmitStaleCodeBlocks(lambda msgs, i: bool(blender.current_script)),
-        Pin(lambda: f"{PIN_HEADER}```python\n{blender.current_script}\n```" if blender.current_script else None),
+        Pin(lambda: script_pin(blender)),
         BudgetGuard(max_tokens),
     ])
 

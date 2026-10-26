@@ -15,6 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 mcp = ["mcp>=2.3,<3"]
+retrieval = ["numpy>=2", "fastembed>=0.9"]   # M3 code retrieval (memory/session/retrieval.py)
 
 [project.scripts]
 blendharness-mcp = "blendharness.protocol.mcp_server:main"

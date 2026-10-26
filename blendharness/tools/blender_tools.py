@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional, TypedDict
 
 from blendharness.core.tools import Tool, ToolResult
+from blendharness.memory.session.sections import find_section, split_sections
 from blendharness.sandbox.guard import check_code
 from blendharness.sandbox.session import BlenderSession
 from blendharness.tools.render import RENDER_PREFIX, RENDER_SCRIPT
@@ -38,6 +39,8 @@ class BlenderTools:
         self.current_script = ""          # last script that executed successfully
         self.history: list[dict] = []     # every attempted script and its outcome
         self.declared: list[dict] = []    # declare_changes calls: what the agent says it changed this run
+        self.script_view = "full"         # "outline": the context shows an outline + the `focus` sections (M3)
+        self.focus: list[str] = []
 
     # ---------- tool functions (what the agent calls) ----------
     def execute_bpy(self, code: str) -> ToolResult:
@@ -110,6 +113,17 @@ class BlenderTools:
         body = "\n".join(f"{i:4d}| {lines[i - 1]}" for i in range(start, end + 1))
         more = f"\n... ({len(lines) - end} more lines: call view_script with start_line={end + 1})" if end < len(lines) else ""
         return ToolResult(f"lines {start}-{end} of {len(lines)}\n{body}{more}")
+
+    def view_section(self, name: str) -> ToolResult:
+        """One section of the current script (a helper function or a commented block), by its outline name."""
+        if not self.current_script:
+            return ToolResult("ERROR: there is no script yet.", True)
+        sections = split_sections(self.current_script)
+        s = find_section(sections, name)
+        if s is None:
+            return ToolResult(f"ERROR: no section {name!r}. Sections: {', '.join(x.name for x in sections)}", True)
+        return ToolResult(f"section {s.name!r}, lines {s.start}-{s.end} (exact text, usable as edit_script "
+                          f"old_string):\n{s.text}")
 
     def inspect_scene(self) -> ToolResult:
         snap = self.snapshot()
@@ -243,6 +257,20 @@ class BlenderTools:
                 permission="read",
             ),
         ]
+        if self.script_view == "outline":
+            edit = next(t for t in tools if t.name == "edit_script")
+            edit.description = edit.description.replace(
+                "The current script is always shown in full at the end of your context.",
+                "The end of your context shows an outline of the script and the sections most relevant to the "
+                "request; load any other section with view_section before editing it.")
+            tools.append(Tool(
+                name="view_section",
+                description="Show one section of the current script, by its name in the outline, as exact text.",
+                parameters={"type": "object", "properties": {"name": {"type": "string", "description": "Section name."}},
+                            "required": ["name"]},
+                fn=self.view_section,
+                permission="read",
+            ))
         if not include_edit:  # ablation: full-script rewrites only (M3 baseline behaviour)
             tools = [t for t in tools if t.name not in ("edit_script", "view_script")]
         if include_declare:   # session turns only, so single builds keep exactly the tools they always had

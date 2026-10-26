@@ -11,7 +11,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from blendharness.agents.coder import make_coder
 from blendharness.agents.critic import critique
@@ -62,6 +62,7 @@ class BuildConfig:
     lessons_dir: str | None = None             # RSI: lesson library folder (None = no lessons in the prompt)
     track_lesson_usage: bool = False           # update lesson stats (off by default: A/B tests need a frozen library)
     declare_changes: bool = False              # session turns: the Coder must declare what it changed (off = old tools)
+    script_view: str = "full"                  # "outline": the Coder sees an outline + the focus sections (M3)
     save_scenes: bool = False                  # session turns: write scene_after.json (scene_before.json when editing)
 
 
@@ -85,7 +86,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
               session_factory: Callable[[Path], BlenderSession] = BlenderSession,
               resume: bool = False,
               fork_from: tuple[str | Path, str] | None = None,
-              initial_script: str = "", review: str = "") -> dict:
+              initial_script: str = "", review: str = "", focus: Optional[list[str]] = None) -> dict:
     """Run the full pipeline once; writes trace/renders/checkpoints/final_script/result.json into run_dir.
 
     resume=True       continue an interrupted build in run_dir from its latest checkpoint (its saved config wins)
@@ -94,6 +95,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
     initial_script    start from this working script instead of an empty scene: round 0 then EDITS it
                       (one turn of a multi-turn session, workflow/session.py)
     review            what the Critic and Verifier judge against, if not the prompt itself
+    focus             with script_view="outline": the script sections shown in full (retrieved for the request)
     llm_factory(model, tracer, extra_body=...) and session_factory(log_path) default to the real classes;
     tests inject scripted fakes to run the whole pipeline without network or Blender.
     """
@@ -114,7 +116,8 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
         checkpoints.save("fork", state.to_dict())
         log(f"--- forked from {state.forked_from}")
     else:
-        state = BuildState(prompt=prompt, config=asdict(cfg), current_script=initial_script, review=review)
+        state = BuildState(prompt=prompt, config=asdict(cfg), current_script=initial_script, review=review,
+                           focus=list(focus or []))
 
     tracer = Tracer(run_dir, run_id=run_dir.name, resume=resume)
     with session_factory(run_dir / "blender.log") as session:
@@ -147,6 +150,7 @@ class _Build:
                                     preamble_provider=self.skill_tools.preamble if self.skill_tools else None)
         # Restore the tool world from the state (no-ops for a fresh build).
         self.blender.current_script = state.current_script
+        self.blender.script_view, self.blender.focus = cfg.script_view, state.focus
         self.blender.history = state.exec_history
         if self.skill_tools:
             self.skill_tools.loaded = state.loaded_skills

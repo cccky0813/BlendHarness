@@ -19,7 +19,7 @@ parser.add_argument("--resume", metavar="DIR")
 parser.add_argument("--fork", nargs=2, metavar=("DIR", "TURN"))
 parser.add_argument("--coder-model", default=BuildConfig.coder_model)
 parser.add_argument("--rounds", type=int, default=BuildConfig.rounds)
-parser.add_argument("--memory", default="history", choices=["history", "structured"])
+parser.add_argument("--memory", default="history", choices=["history", "structured", "retrieval"])
 args = parser.parse_args()
 
 cfg = SessionConfig(BuildConfig(coder_model=args.coder_model, rounds=args.rounds), memory=args.memory)
