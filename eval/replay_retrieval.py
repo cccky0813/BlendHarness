@@ -2,7 +2,7 @@
 and hybrid (RRF), on the turns the sessions actually ran. Costs nothing: no model call, no Blender.
 
 For every turn k >= 2 of every session: the script before the turn (checkpoint t{k-1}_done), the request (plus the
-objects the ledger keeper resolved, when the session had structured memory), and the gold = the sections of the
+objects the ledger keeper resolved and their materials, as the session builds it), and the gold = the sections of the
 before-script that the Coder's edit really touched (touched_sections, line-based). Any memory strategy's sessions
 work; M2 sessions are the intended source, so M3's retriever is judged on edits it did not influence.
 
@@ -21,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from blendharness.core.session import Checkpointer  # noqa: E402
 from blendharness.memory.session.retrieval import MODES, LocalEmbedder, Retriever, recall_at_k  # noqa: E402
-from blendharness.memory.session.sections import split_sections, touched_sections  # noqa: E402
+from blendharness.memory.session.sections import split_sections, touched_sections, with_definitions  # noqa: E402
+from blendharness.workflow.session import retrieval_query  # noqa: E402
 
 
 def turns_of(session_dir: Path) -> list[dict]:
@@ -38,11 +39,19 @@ def turns_of(session_dir: Path) -> list[dict]:
         if not before or not after or not before.get("current_script"):
             continue
         b, a = before["current_script"], after["current_script"]
-        refs = [o for r in (t.get("ledger") or {}).get("references", []) for o in r["objects"]]
+        refs = (t.get("ledger") or {}).get("references", [])
+        scene_dir = session_dir / "turns" / f"t{k - 1:02d}"
+        if not scene_dir.exists() and fork is not None:
+            src, label = fork["forked_from"].rsplit("@", 1)
+            scene_dir = Path(src) / "turns" / label
+        scene = json.loads((scene_dir / "scene_after.json").read_text()) if (scene_dir / "scene_after.json").exists() else {}
         cases.append({"session": session_dir.name, "turn": k, "request": t["request"],
-                      "query": " ".join([t["request"], *refs]), "before": b,
+                      "query": retrieval_query(t["request"], refs, scene), "before": b,
                       "gold": touched_sections(b, a), "n_sections": len(split_sections(b))})
     return cases
+
+
+DEPS = 2
 
 
 def replay(cases: list[dict], ks: list[int], retriever: Retriever) -> dict:
@@ -55,9 +64,13 @@ def replay(cases: list[dict], ks: list[int], retriever: Retriever) -> dict:
         for mode in MODES:
             ranked = [n for n, _ in retriever.rank(c["query"], secs, mode)]
             row[mode] = {"top": ranked[:max(ks)], **{f"recall@{k}": recall_at_k(ranked, c["gold"], k) for k in ks}}
+            # + definitions: top k plus up to DEPS blocks defining what they read (what M3 actually shows)
+            row[mode + "+deps"] = {f"recall@{k}": recall_at_k(with_definitions(ranked[:k], secs, DEPS), c["gold"], k + DEPS)
+                                   for k in ks}
         rows.append(row)
+    modes = [m + d for m in MODES for d in ("", "+deps")]
     table = {mode: {f"recall@{k}": round(statistics.mean(r[mode][f"recall@{k}"] for r in rows), 3) if rows else None
-                    for k in ks} for mode in MODES}
+                    for k in ks} for mode in modes}
     return {"n_turns": len(rows), "skipped_no_change": len(cases) - len(rows), "mean": table, "turns": rows}
 
 

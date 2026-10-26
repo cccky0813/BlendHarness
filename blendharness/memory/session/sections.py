@@ -8,7 +8,9 @@ under banner comments (`# ---- stone well ----`). So a section is either
 Every section records the object names its string literals mention, which links the scene registry to the code.
 
 Ground truth for retrieval: `touched_sections(before, after)` = the sections of the script BEFORE a turn whose lines
-the turn changed (deleted, replaced, or inserted after). It is computed on lines, so renaming a banner still counts.
+the turn changed (deleted, replaced, or inserted into). It is computed on lines, so renaming a banner still counts.
+Code inserted as a NEW section (a chunk that opens with its own comment after a blank line) touches nothing: new
+code needs no retrieval, only the code an edit has to change does.
 """
 
 import ast
@@ -31,6 +33,8 @@ class Section:
     text: str
     comment: str = ""
     objects: list[str] = field(default_factory=list)
+    defines: set[str] = field(default_factory=set)     # top-level names it assigns (M_ROOF, WX) or the def's name
+    uses: set[str] = field(default_factory=set)        # names it reads
 
     def search_text(self) -> str:
         """What retrieval indexes: name, comment, object names, then the code."""
@@ -81,8 +85,12 @@ def split_sections(script: str) -> list[Section]:
             comment = _comment_text(lines, start)
             objs = _objects(text)
             imports = all(isinstance(n, (ast.Import, ast.ImportFrom)) for _, _, n in block)
-            sections.append(Section(comment or ("imports" if imports else _dominant_group(objs) or "block"), "block",
-                                    start, end, text, comment, objs))
+            # `# --- materials ---` above `def material()` and then `M_STONE = material(...)`: the banner the
+            # helper took names the code after it too
+            inherited = sections[-1].comment if sections and sections[-1].kind == "helper" else ""
+            name = comment or inherited or ("imports" if imports else "") or _dominant_group(objs) or \
+                ("setup" if not sections else "block")
+            sections.append(Section(name, "block", start, end, text, comment or inherited, objs))
         block = []
 
     for start, end, node in spans:
@@ -96,8 +104,36 @@ def split_sections(script: str) -> list[Section]:
             flush()
         block.append((start, end, node))
     flush()
+    for s in sections:
+        s.defines, s.uses = _names(s.text, s.kind)
     _dedupe(sections)
     return sections
+
+
+def _names(code: str, kind: str) -> tuple[set[str], set[str]]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return set(), set()
+    if kind == "helper":
+        return {n.name for n in tree.body if hasattr(n, "name")}, set()
+    defines = set()
+    for n in tree.body:
+        targets = n.targets if isinstance(n, ast.Assign) else [n.target] if isinstance(n, (ast.AnnAssign, ast.AugAssign)) else []
+        for t in targets:
+            defines |= {x.id for x in ast.walk(t) if isinstance(x, ast.Name)}
+    uses = {x.id for x in ast.walk(tree) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load)}
+    return defines, uses - defines
+
+
+def with_definitions(focus: list[str], sections: list[Section], max_extra: int = 2) -> list[str]:
+    """`focus` plus up to `max_extra` blocks that define names the focus sections read (the roof block reads
+    M_SHINGLE -> the materials block), most names first. Helpers are left to the outline."""
+    by_name = {s.name: s for s in sections}
+    used = set().union(*(by_name[n].uses for n in focus if n in by_name)) if focus else set()
+    extra = sorted((s for s in sections if s.kind == "block" and s.name not in focus and s.defines & used),
+                   key=lambda s: -len(s.defines & used))
+    return list(focus) + [s.name for s in extra[:max_extra]]
 
 
 def _comment_start(lines: list[str], start: int) -> int:
@@ -156,6 +192,15 @@ def render_outline(sections: list[Section], max_objects: int = 8) -> str:
     return "\n".join(out)
 
 
+def _new_section(before: list[str], at: int, inserted: list[str]) -> bool:
+    """The inserted chunk opens a section of its own: its first non-blank line is a comment, after a blank line."""
+    k = next((i for i, line in enumerate(inserted) if line.strip()), None)
+    if k is None:
+        return True                                    # only blank lines
+    after_blank = k > 0 or at == 0 or not before[at - 1].strip()
+    return inserted[k].lstrip().startswith("#") and after_blank
+
+
 def touched_sections(before: str, after: str) -> list[str]:
     """Names of the sections of `before` that the change to `after` touched (see module docstring)."""
     sections = split_sections(before)
@@ -171,11 +216,11 @@ def touched_sections(before: str, after: str) -> list[str]:
         prev = [s for s in sections if s.end < line]  # blank / comment gap: the section above
         return prev[-1].name if prev else sections[0].name
 
-    for tag, i1, i2, _, _ in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
         if i2 > i1:                                    # replaced or deleted lines
             touched.update(filter(None, (owner(i) for i in range(i1 + 1, i2 + 1))))
-        else:                                          # pure insertion after line i1
+        elif not _new_section(a, i1, b[j1:j2]):        # pure insertion after line i1, inside a section
             touched.add(owner(max(i1, 1)))
     return [s.name for s in sections if s.name in touched]

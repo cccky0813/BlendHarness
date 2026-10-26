@@ -39,7 +39,7 @@ from blendharness.core.tracing import Tracer
 from blendharness.memory.session import (SessionMemory, episode_line, registry_rows, render_episodes, render_ledger,
                                          render_registry)
 from blendharness.memory.session.retrieval import Embedder, LocalEmbedder, Retriever, recall_at_k
-from blendharness.memory.session.sections import split_sections, touched_sections
+from blendharness.memory.session.sections import split_sections, touched_sections, with_definitions
 from blendharness.sandbox.session import BlenderSession
 from blendharness.tools.scene import diff_snapshots
 from blendharness.workflow.build import BuildConfig, run_build
@@ -55,6 +55,7 @@ class SessionConfig:
     ledger_model: str = "claude-haiku-4-5"
     retrieval_k: int = 3                  # retrieval: sections shown in full
     retrieval_mode: str = "hybrid"        # bm25 | vector | hybrid
+    retrieval_deps: int = 2               # + blocks defining names the retrieved sections read (0 = off)
 
     def to_dict(self) -> dict:
         return {**asdict(self), "build": asdict(self.build)}
@@ -114,6 +115,12 @@ def structured_texts(mem: SessionMemory, request: str, turn: int, references: li
     review = (f"Current request (turn {turn}):\n{request}\n\nRequirements from earlier turns that still apply:\n"
               f"{ledger or '(none)'}\n\n{REVIEW_RULE}")
     return task, review
+
+
+def retrieval_query(request: str, references: list[dict], scene: dict) -> str:
+    named = [o for r in references for o in r["objects"]]
+    mats = [m for o in scene.get("objects", []) if o["name"] in named for m in o.get("material_names") or []]
+    return " ".join(dict.fromkeys([request, *named, *mats]))
 
 
 def unrequested_changes(before: dict, after: dict, declared: list[dict]) -> list[str]:
@@ -183,10 +190,11 @@ class Session:
             plan, plan_cost = self._plan(mem, request, k, turn_dir)
             task, review = structured_texts(mem, request, k, plan["references"], plan["added"])
             if cfg.memory == "retrieval" and s.current_script:
-                query = " ".join([request] + [o for r in plan["references"] for o in r["objects"]])
-                focus = Retriever(self.embedder, mem.db).search(query, split_sections(s.current_script),
-                                                                cfg.retrieval_k, cfg.retrieval_mode)
-                retrieval = {"query": query, "mode": cfg.retrieval_mode, "focus": focus}
+                query = self._query(request, plan["references"], k)
+                sections = split_sections(s.current_script)
+                ranked = Retriever(self.embedder, mem.db).search(query, sections, cfg.retrieval_k, cfg.retrieval_mode)
+                focus = with_definitions(ranked, sections, cfg.retrieval_deps)
+                retrieval = {"query": query, "mode": cfg.retrieval_mode, "ranked": ranked, "focus": focus}
                 self.log(f"--- retrieved sections: {focus}")
         else:
             task, review = turn_texts([t["request"] for t in s.turns], request, cfg.memory)
@@ -209,7 +217,8 @@ class Session:
             gold = touched_sections(s.current_script, after_script)
             entry["touched_sections"] = gold
             if retrieval is not None:
-                entry["retrieval"] = {**retrieval, "recall": recall_at_k(focus, gold, cfg.retrieval_k)}
+                entry["retrieval"] = {**retrieval, "recall_ranked": recall_at_k(retrieval["ranked"], gold, cfg.retrieval_k),
+                                      "recall": recall_at_k(focus, gold, len(focus))}
         if mem is not None:
             rows = registry_rows(scene_after, mem.objects(), k, declared, plan["added"][0] if plan["added"] else None)
             mem.set_objects(rows)
@@ -240,6 +249,15 @@ class Session:
         self.log(f"--- ledger: +{len(added)} requirement(s), {len(update.supersede)} superseded"
                  + (" (fallback: request added verbatim)" if update.fallback else ""))
         return plan, tracer.summary()["total"].get("cost_usd", 0.0)
+
+    def _query(self, request: str, references: list[dict], k: int) -> str:
+        """Retrieval query: the request, the objects it refers to, and their materials (from the scene after the
+        previous turn), so "make the roof red" also finds the block that defines the roof's material."""
+        scene = self._read(self.dir / "turns" / f"t{k - 1:02d}" / "scene_after.json")
+        if not scene["objects"] and self.state.forked_from:          # a fork's first turn: the source's scene
+            src, label = self.state.forked_from.rsplit("@", 1)
+            scene = self._read(Path(src) / "turns" / label / "scene_after.json")
+        return retrieval_query(request, references, scene)
 
     @staticmethod
     def _read(path: Path) -> dict:

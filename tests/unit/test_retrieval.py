@@ -7,7 +7,8 @@ import sqlite3
 
 from blendharness.agents.coder import script_pin
 from blendharness.memory.session.retrieval import BM25, Retriever, recall_at_k, tokenize
-from blendharness.memory.session.sections import find_section, render_outline, split_sections, touched_sections
+from blendharness.memory.session.sections import (find_section, render_outline, split_sections, touched_sections,
+                                                  with_definitions)
 from blendharness.workflow.build import BuildConfig
 from blendharness.workflow.session import SessionConfig, run_session
 from tests.fakes import reply
@@ -77,6 +78,19 @@ def test_touched_sections_is_line_based():
     renamed = VILLAGE.replace("# ---- cottage ----", "# ---- the house ----")
     assert touched_sections(VILLAGE, renamed) == ["cottage"]
     assert touched_sections(VILLAGE, VILLAGE) == []
+    new_part = VILLAGE + '\n# ---- spare bucket ----\nbox("Bucket2", 0, 1, M_STONE)\n'
+    assert touched_sections(VILLAGE, new_part) == []          # a new section of its own: nothing to retrieve
+
+
+def test_banner_above_a_helper_names_the_block_after_it_and_definitions_expand_focus():
+    script = ("import bpy\n\n# ---- materials ----\ndef material(name, c):\n    return c\n\n"
+              "M_ROOF = material('Shingle', 1)\nM_WOOD = material('Wood', 2)\n\n# ---- size ----\nH = 2.0\n\n"
+              "# ---- roof ----\nbox('Roof', H, M_ROOF)\n")
+    secs = split_sections(script)
+    assert [s.name for s in secs] == ["imports", "material", "materials", "size", "roof"]
+    assert secs[2].defines == {"M_ROOF", "M_WOOD"} and {"H", "M_ROOF", "box"} <= secs[4].uses
+    assert with_definitions(["roof"], secs) == ["roof", "materials", "size"]
+    assert with_definitions(["roof"], secs, max_extra=0) == ["roof"]
 
 
 def test_bm25_vector_and_hybrid_ranking():
@@ -118,7 +132,7 @@ def test_retrieval_session_retrieves_and_scores_its_own_recall(tmp_path, session
                           session_factory=sessions, embedder=HashEmbedder())
     t2 = summary["turns"][1]
     assert t2["retrieval"]["focus"] and t2["touched_sections"]
-    assert t2["retrieval"]["recall"] in (0.0, 1.0)
+    assert t2["retrieval"]["ranked"] == t2["retrieval"]["focus"][:1] and t2["retrieval"]["recall"] is not None
     first_view = models.llms["coder"].seen[2]
     pinned = json.dumps(first_view)
     assert "as an outline" in pinned and "view_section" in json.dumps(models.llms["coder"].seen[2])
