@@ -28,6 +28,8 @@ class BuildState:
     elapsed_s: float = 0.0                       # wall time over all processes that worked on this build
     sandbox_restarts: int = 0
     forked_from: str = ""                        # "<run dir>@<checkpoint label>" if this build is a fork
+    review: str = ""                             # what the Critic and Verifier judge against ("" = the prompt);
+                                                 # a session turn sets it to the turn request + earlier ones
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

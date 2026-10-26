@@ -37,6 +37,7 @@ class BlenderTools:
         self.resolution = resolution
         self.current_script = ""          # last script that executed successfully
         self.history: list[dict] = []     # every attempted script and its outcome
+        self.declared: list[dict] = []    # declare_changes calls: what the agent says it changed this run
 
     # ---------- tool functions (what the agent calls) ----------
     def execute_bpy(self, code: str) -> ToolResult:
@@ -129,6 +130,16 @@ class BlenderTools:
             )
         return ToolResult("\n".join(lines))
 
+    def declare_changes(self, added: list[str] | None = None, modified: list[str] | None = None,
+                        removed: list[str] | None = None, note: str = "") -> ToolResult:
+        """Record what this edit changed. The harness compares it with the real scene diff: anything that
+        changed but was not declared is a suspected regression."""
+        entry = {"added": list(added or []), "modified": list(modified or []), "removed": list(removed or []),
+                 "note": note}
+        self.declared.append(entry)
+        return ToolResult(f"OK: declared {len(entry['added'])} added, {len(entry['modified'])} modified, "
+                          f"{len(entry['removed'])} removed object(s).")
+
     # ---------- helpers used by the harness / other agents ----------
     def snapshot(self) -> dict:
         """Structured scene state (Scene-Inspector) of current_script."""
@@ -174,7 +185,7 @@ class BlenderTools:
             return f'File "<your script>", line {n - offset}' if n > offset else f'File "<skill code>", line {n}'
         return re.sub(r'File "<agent_code>", line (\d+)', fix, text)
 
-    def as_tools(self, include_edit: bool = True) -> list[Tool]:
+    def as_tools(self, include_edit: bool = True, include_declare: bool = False) -> list[Tool]:
         tools = [
             Tool(
                 name="execute_bpy",
@@ -234,6 +245,19 @@ class BlenderTools:
         ]
         if not include_edit:  # ablation: full-script rewrites only (M3 baseline behaviour)
             tools = [t for t in tools if t.name not in ("edit_script", "view_script")]
+        if include_declare:   # session turns only, so single builds keep exactly the tools they always had
+            names = {"type": "array", "items": {"type": "string"}}
+            tools.append(Tool(
+                name="declare_changes",
+                description=("Before you finish, declare which scene objects this edit added, modified or removed "
+                             "(exact object names). Anything else that changed will be treated as an accident."),
+                parameters={"type": "object",
+                            "properties": {"added": names, "modified": names, "removed": names,
+                                           "note": {"type": "string", "description": "One sentence: what you did."}},
+                            "required": ["added", "modified", "removed"]},
+                fn=self.declare_changes,
+                permission="write",
+            ))
         return tools
 
     def _scene_summary_line(self, snap: dict) -> str:

@@ -23,6 +23,18 @@ def executed_successfully(messages: list[dict]) -> str | None:
             "does nothing; call execute_bpy with the complete script and make sure it runs.")
 
 
+def executed_and_declared(messages: list[dict]) -> str | None:
+    """Session turns: a script ran AND the agent declared what it changed (after its last run)."""
+    problem = executed_successfully(messages)
+    if problem:
+        return problem
+    last_run = max(i for i, m in enumerate(messages) if _is_ok_run(m))
+    if any(str(m.get("content", "")).startswith("OK: declared") for m in messages[last_run:] if m.get("role") == "tool"):
+        return None
+    return ("call declare_changes with the objects this edit added, modified and removed, after your last "
+            "successful run.")
+
+
 def _is_ok_run(m: dict) -> bool:
     """A tool result saying a script (full or edited) ran successfully."""
     content = str(m.get("content", ""))
@@ -62,7 +74,7 @@ def make_coder_context(blender: BlenderTools, max_tokens: int = 100_000) -> Cont
 
 def make_coder(llm: LLMClient, blender: BlenderTools, skill_tools: SkillTools | None = None, max_steps: int = 15,
                max_cost_usd: float | None = 0.5, compact_context: bool = True,
-               edit_tools: bool = True, lessons: str = "") -> AgentLoop:
+               edit_tools: bool = True, lessons: str = "", declare_changes: bool = False) -> AgentLoop:
     prompt = CODER_PROMPT
     if lessons:  # learned from past failures (memory/lessons); empty -> the prompt is unchanged
         prompt += ("\nLessons learned from past builds (follow them while writing the script, and check them "
@@ -74,11 +86,12 @@ def make_coder(llm: LLMClient, blender: BlenderTools, skill_tools: SkillTools | 
                    + index + "\n")
     return AgentLoop(
         context_policy=make_coder_context(blender) if compact_context else None,
-        completion_check=executed_successfully,
+        completion_check=executed_and_declared if declare_changes else executed_successfully,
         name="coder",
         llm=llm,
         system_prompt=prompt,
-        tools=blender.as_tools(include_edit=edit_tools) + (skill_tools.as_tools() if skill_tools else []),
+        tools=blender.as_tools(include_edit=edit_tools, include_declare=declare_changes)
+        + (skill_tools.as_tools() if skill_tools else []),
         max_steps=max_steps,
         max_same_error=3,
         max_cost_usd=max_cost_usd,

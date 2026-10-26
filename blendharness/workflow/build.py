@@ -61,6 +61,7 @@ class BuildConfig:
     track_skill_usage: bool = True             # update stats.json (off = frozen library for a fair test)
     lessons_dir: str | None = None             # RSI: lesson library folder (None = no lessons in the prompt)
     track_lesson_usage: bool = False           # update lesson stats (off by default: A/B tests need a frozen library)
+    declare_changes: bool = False              # session turns: the Coder must declare what it changed (off = old tools)
 
 
 def effort_body(model: str, effort: str) -> dict | None:
@@ -82,12 +83,16 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
               llm_factory: Callable[..., LLMClient] = LLMClient,
               session_factory: Callable[[Path], BlenderSession] = BlenderSession,
               resume: bool = False,
-              fork_from: tuple[str | Path, str] | None = None) -> dict:
+              fork_from: tuple[str | Path, str] | None = None,
+              initial_script: str = "", review: str = "") -> dict:
     """Run the full pipeline once; writes trace/renders/checkpoints/final_script/result.json into run_dir.
 
     resume=True       continue an interrupted build in run_dir from its latest checkpoint (its saved config wins)
     fork_from=(d, l)  start a NEW build in run_dir from checkpoint `l` of build `d`, possibly with another
                       config, e.g. same round-0 build, different revision strategy (a cheaper, fairer ablation)
+    initial_script    start from this working script instead of an empty scene: round 0 then EDITS it
+                      (one turn of a multi-turn session, workflow/session.py)
+    review            what the Critic and Verifier judge against, if not the prompt itself
     llm_factory(model, tracer, extra_body=...) and session_factory(log_path) default to the real classes;
     tests inject scripted fakes to run the whole pipeline without network or Blender.
     """
@@ -108,7 +113,7 @@ def run_build(prompt: str, cfg: BuildConfig, run_dir: str | Path,
         checkpoints.save("fork", state.to_dict())
         log(f"--- forked from {state.forked_from}")
     else:
-        state = BuildState(prompt=prompt, config=asdict(cfg))
+        state = BuildState(prompt=prompt, config=asdict(cfg), current_script=initial_script, review=review)
 
     tracer = Tracer(run_dir, run_id=run_dir.name, resume=resume)
     with session_factory(run_dir / "blender.log") as session:
@@ -153,19 +158,23 @@ class _Build:
                                 if x.id in state.lesson_ids)
         self.coder = make_coder(llm_factory(cfg.coder_model, tracer, extra_body=effort_body(cfg.coder_model, cfg.coder_effort)),
                                 self.blender, skill_tools=self.skill_tools, max_cost_usd=cfg.coder_max_cost_usd,
-                                compact_context=cfg.compact_context, edit_tools=cfg.edit_tools, lessons=lesson_text)
+                                compact_context=cfg.compact_context, edit_tools=cfg.edit_tools, lessons=lesson_text,
+                                declare_changes=cfg.declare_changes)
         self.critic_llm = llm_factory(cfg.critic_model, tracer, extra_body=effort_body(cfg.critic_model, cfg.critic_effort))
         self.verifier_llm = self.critic_llm  # same model by default; still a separate role with its own prompt
         self.refine = refine_template(cfg)
 
     # ---------- phases ----------
     def round0(self) -> None:
-        """Build from the prompt, then an open-ended critique."""
+        """Build from the prompt (or, in a session turn, edit the script it starts from), then an open-ended
+        critique."""
         s, blender = self.state, self.blender
+        if s.current_script:                       # a session turn: keep the scene before the edit
+            self._write_scene("scene_before.json")
         result = self.coder.run(s.prompt)
         if blender.current_script:
             renders = blender.render("round0", num_views=3)
-            verdict = critique(self.critic_llm, s.prompt, renders, blender.inspect_scene().content)
+            verdict = critique(self.critic_llm, s.review or s.prompt, renders, blender.inspect_scene().content)
             s.approved, s.open_issues, s.feedback, s.last_renders = verdict.approved, verdict.issues, verdict.as_text(), renders
             s.rounds_log.append({"round": 0, "coder_status": result.status, "coder_steps": result.steps,
                                  "renders": renders, "critic_approved": verdict.approved,
@@ -187,7 +196,7 @@ class _Build:
                                                    issues=s.feedback))  # {script} unused by the edit template
         renders = blender.render(f"round{rnd}", num_views=3)
         diff = diff_snapshots(before_snapshot, blender.snapshot())
-        check = verify(self.verifier_llm, s.prompt, s.open_issues, before_renders, renders, diff)
+        check = verify(self.verifier_llm, s.review or s.prompt, s.open_issues, before_renders, renders, diff)
         s.approved, s.last_renders = check.passed, renders
         s.rounds_log.append({"round": rnd, "coder_status": result.status, "coder_steps": result.steps,
                              "renders": renders, "diff": diff, "verified": check.passed,
@@ -224,6 +233,8 @@ class _Build:
     def finalize(self) -> dict:
         s, blender, skills, skill_tools = self.state, self.blender, self.skills, self.skill_tools
         (self.run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
+        if s.config.get("declare_changes"):        # session turns: the scene after, for regressions and scoring
+            self._write_scene("scene_after.json")
         for name in (skill_tools.loaded if skill_tools and self.cfg.track_skill_usage else []):  # quality signal
             skills.record_use(name, success=s.approved)
         if self.lessons is not None and self.cfg.track_lesson_usage and s.lesson_ids:
@@ -244,11 +255,15 @@ class _Build:
             "skills_learned": s.learned,
             "lessons_used": list(s.lesson_ids),
             "checkpoints": self.checkpoints.labels(),
+            "declared_changes": list(blender.declared),
             "forked_from": s.forked_from or None,
             "llm_total": total["total"], "llm_per_agent": total["per_agent"],
         }
         (self.run_dir / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         return record
+
+    def _write_scene(self, name: str) -> None:
+        (self.run_dir / name).write_text(json.dumps(self.blender.snapshot(), ensure_ascii=False), encoding="utf-8")
 
     # ---------- checkpoint ----------
     def save(self, label: str) -> None:
