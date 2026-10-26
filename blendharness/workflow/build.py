@@ -62,6 +62,7 @@ class BuildConfig:
     lessons_dir: str | None = None             # RSI: lesson library folder (None = no lessons in the prompt)
     track_lesson_usage: bool = False           # update lesson stats (off by default: A/B tests need a frozen library)
     declare_changes: bool = False              # session turns: the Coder must declare what it changed (off = old tools)
+    save_scenes: bool = False                  # session turns: write scene_after.json (scene_before.json when editing)
 
 
 def effort_body(model: str, effort: str) -> dict | None:
@@ -233,7 +234,7 @@ class _Build:
     def finalize(self) -> dict:
         s, blender, skills, skill_tools = self.state, self.blender, self.skills, self.skill_tools
         (self.run_dir / "final_script.py").write_text(blender.full_script(), encoding="utf-8")  # standalone, incl. skills
-        if s.config.get("declare_changes"):        # session turns: the scene after, for regressions and scoring
+        if s.config.get("declare_changes") or s.config.get("save_scenes"):   # session turns: the scene after
             self._write_scene("scene_after.json")
         for name in (skill_tools.loaded if skill_tools and self.cfg.track_skill_usage else []):  # quality signal
             skills.record_use(name, success=s.approved)
