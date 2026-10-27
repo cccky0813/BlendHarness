@@ -102,3 +102,13 @@ def test_turn_texts_and_unknown_memory():
     assert T2 in review and "1. " + T1 in review and "Judge mainly" in review
     with pytest.raises(NotImplementedError):
         turn_texts([T1], T2, "structured")
+
+
+def test_a_resumed_fork_numbers_its_turns_after_the_fork_point(tmp_path, sessions):
+    models = Models(coder=coder_builds() + ADD_BACK + ADD_CUSHION, critic=[reply(CRITIC_OK)] * 3)
+    run(tmp_path, sessions, models, [T1, T2])
+    fork = tmp_path / "fork"
+    kw = dict(log=lambda m: None, llm_factory=models, session_factory=sessions)
+    run_session([T3], CFG, fork, fork_from=(tmp_path / "s", 1), **kw)
+    again = run_session([T3], CFG, fork, fork_from=(tmp_path / "s", 1), resume=True, **kw)   # nothing left to run
+    assert [t["request"] for t in again["turns"]] == [T1, T3]

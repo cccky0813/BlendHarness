@@ -123,6 +123,7 @@ def test_structured_turn_sees_ledger_registry_and_references(tmp_path, sessions)
     mem = SessionMemory(tmp_path / "s" / "checkpoints" / "memory_t02.db")
     assert [r["text"] for r in mem.requirements()][-1] == "The stool has a backrest named Back."
     assert {o["name"]: o["added_turn"] for o in mem.objects()} == {"Seat": 1, "Leg": 1, "Back": 2}
+    assert {o["name"]: o["requirement"] for o in mem.objects()}["Back"] == "r2"     # one new requirement: linked
     assert len(mem.episodes()) == 2
     assert summary["turns"][1]["ledger"]["added"] == ["r2"]
 
@@ -145,3 +146,11 @@ def test_structured_fork_starts_from_the_branch_turns_memory(tmp_path, sessions)
     run(tmp_path, sessions, models, [T3], dir=tmp_path / "fork", fork_from=(tmp_path / "s", 1))
     texts = [r["text"] for r in SessionMemory(tmp_path / "fork" / "checkpoints" / "memory_t02.db").requirements()]
     assert texts == ["The scene is a stool with a seat and a leg.", "A cushion sits on the seat."]   # no backrest
+
+
+def test_objects_are_not_linked_when_a_turn_adds_several_requirements(tmp_path, sessions):
+    models = Models(coder=coder_builds() + ADD_BACK, critic=[reply(CRITIC_OK)] * 2,
+                    ledger=[ledger(["A stool."]), ledger(["The stool has a backrest.", "The seat is red."])])
+    run(tmp_path, sessions, models, [T1, T2])
+    objs = {o["name"]: o for o in SessionMemory(tmp_path / "s" / "checkpoints" / "memory_t02.db").objects()}
+    assert objs["Back"]["requirement"] is None and objs["Seat"]["requirement"] == "r1"

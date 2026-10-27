@@ -220,7 +220,10 @@ class Session:
                 entry["retrieval"] = {**retrieval, "recall_ranked": recall_at_k(retrieval["ranked"], gold, cfg.retrieval_k),
                                       "recall": recall_at_k(focus, gold, len(focus))}
         if mem is not None:
-            rows = registry_rows(scene_after, mem.objects(), k, declared, plan["added"][0] if plan["added"] else None)
+            # objects added this turn belong to its requirement only when there is exactly one: with several, which
+            # object serves which is unknown, and a wrong link is worse than none
+            only = plan["added"][0] if len(plan["added"]) == 1 else None
+            rows = registry_rows(scene_after, mem.objects(), k, declared, only)
             mem.set_objects(rows)
             mem.add_episode(k, request, episode_line(k, request, declared, record["approved"], len(unrequested)),
                             {"declared": declared, "unrequested": unrequested, "approved": record["approved"]})
@@ -276,10 +279,12 @@ def run_session(requests: Iterable[str], cfg: SessionConfig, session_dir: str | 
     already finished are skipped (their requests must match); with fork_from=(dir, k), the session continues
     from turn k of another session, and `requests` are the turns after it."""
     session = Session(session_dir, cfg, **kwargs)
-    done = len(session.state.turns) if kwargs.get("resume") else 0
-    for k, request in enumerate(requests, 1):
-        if k <= done:
-            if session.state.turns[k - 1]["request"] != request:
+    s = session.state
+    first = int(s.forked_from.rsplit("@t", 1)[1]) if s.forked_from else 0     # a fork's requests start after it
+    for i, request in enumerate(requests):
+        k = first + i + 1
+        if k <= len(s.turns):                                                    # finished before a resume
+            if s.turns[k - 1]["request"] != request:
                 raise ValueError(f"turn {k} of the saved session had a different request; start a new session")
             continue
         session.turn(request)

@@ -8,18 +8,23 @@ Vectors are cached in SQLite (`embeddings`, keyed by model + text hash) in the s
 did not change between turns is never embedded again, and a fork copies the cache along with the memory. A
 session has at most a few hundred sections, so search is a brute-force cosine over a numpy matrix; no vector DB.
 
-Embedders: LocalEmbedder (fastembed, BAAI/bge-small-en-v1.5, 384-d, CPU, ~130 MB downloaded once; free and
+Embedders: LocalEmbedder (fastembed, BAAI/bge-small-en-v1.5, 384-d, CPU, 64 MB downloaded once to MODEL_DIR; free and
 deterministic, which makes offline replays reproducible). Anything with .model and .embed(list[str]) works.
 """
 
 import hashlib
 import math
+import os
 import re
 import sqlite3
 from collections import Counter
+from pathlib import Path
 from typing import Protocol
 
 from blendharness.memory.session.sections import Section
+
+# where fastembed keeps downloaded models: models/fastembed in the repo (gitignored), unless FASTEMBED_CACHE_PATH is set
+MODEL_DIR = Path(os.environ.get("FASTEMBED_CACHE_PATH") or Path(__file__).resolve().parents[3] / "models" / "fastembed")
 
 RRF_K = 60
 MODES = ("bm25", "vector", "hybrid")
@@ -75,7 +80,7 @@ class LocalEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         if self._m is None:
             from fastembed import TextEmbedding      # optional dependency: pip install -e .[retrieval]
-            self._m = TextEmbedding(self.model)
+            self._m = TextEmbedding(self.model, cache_dir=str(MODEL_DIR))
         return [list(map(float, v)) for v in self._m.embed(texts)]
 
 
