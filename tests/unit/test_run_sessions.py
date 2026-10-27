@@ -65,3 +65,23 @@ def test_regressions_and_lost_requirements_are_counted(tmp_path, sessions):
     s = score_experiment([spec], tmp_path / "exp")["M0"]
     assert s["regression_rate"] == 1.0 and s["retention_rate"] == 0.5     # Leg was removed: regression, lost
     assert aggregate([])["editing_turns"] == 0
+
+
+def per_build_models(model, tracer, extra_body=None):
+    """A fresh scripted model per build, chosen by its directory: parallel arms cannot take each other's replies."""
+    from tests.fakes import ScriptedLLM
+    base = "base" in tracer.run_dir.parts
+    script = {"coder": coder_builds() if base else ADD_BACK, "critic": [reply(CRITIC_OK)],
+              "ledger": [ledger(["A stool."] if base else ["The stool has a backrest."])]}[model]
+    return ScriptedLLM(list(script), tracer)
+
+
+def test_parallel_runs_match_sequential(tmp_path, sessions):
+    two = [SESSION, {**SESSION, "id": "stool2"}]
+    kw = dict(log=lambda x: None, llm_factory=per_build_models, session_factory=sessions, ledger_model="ledger")
+    seq = run_experiment(two, {"M0": 1, "M2": 1}, tmp_path / "seq", BUILD, jobs=1, **kw)
+    par = run_experiment(two, {"M0": 1, "M2": 1}, tmp_path / "par", BUILD, jobs=4, **kw)
+    drop = lambda s: {a: {k: v for k, v in row.items() if k != "cost_per_turn"} for a, row in s.items()}  # noqa: E731
+    assert drop(par) == drop(seq) and par["M2"]["sessions"] == 2 and par["M2"]["completion_rate"] == 1.0
+    log = (tmp_path / "par" / "stool2" / "M2_r1" / "run.log").read_text()
+    assert "=== turn 2" in log and "=== turn 1" not in log            # each unit logs to its own file

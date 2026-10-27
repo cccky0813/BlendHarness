@@ -13,6 +13,7 @@ that crashed is retried on the next run (its error is kept in crash.json).
 
     python eval/run_sessions.py --exp pilot                              # all sessions, M0 x2, M2 x2, M3 x1
     python eval/run_sessions.py --exp pilot --sessions village --arms M2 --repeats 1
+    python eval/run_sessions.py --exp pilot --jobs 4                     # 4 arms at once
     python eval/run_sessions.py --exp pilot --score-only                 # rescore, no model calls
 """
 
@@ -20,7 +21,9 @@ import argparse
 import json
 import statistics
 import sys
+import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 
@@ -49,39 +52,70 @@ def requests_of(session: dict) -> list[str]:
 
 
 # ---------- running ----------
+def run_base(session: dict, exp_dir: Path, build: BuildConfig, ledger_model: str = SessionConfig().ledger_model,
+             **kwargs) -> Path:
+    """Turn 1 of a session, once: every arm forks from it."""
+    base = exp_dir / session["id"] / "base"
+    run_session(requests_of(session)[:1], SessionConfig(build, memory=BASE_MEMORY, ledger_model=ledger_model), base,
+                resume=True, **kwargs)
+    return base
+
+
 def run_arm(session: dict, arm: str, repeat: int, exp_dir: Path, build: BuildConfig,
             ledger_model: str = SessionConfig().ledger_model, **kwargs) -> Path:
-    """Base turn 1 (once per session), then this arm's fork for turns 2..n. Returns the arm's directory."""
+    """This arm's fork of base@t01, turns 2..n (the base must have finished). Returns the arm's directory."""
     root = exp_dir / session["id"]
-    reqs = requests_of(session)
-    base = root / "base"
-    run_session(reqs[:1], SessionConfig(build, memory=BASE_MEMORY, ledger_model=ledger_model), base, resume=True,
-                **kwargs)
     arm_dir = root / f"{arm}_r{repeat}"
-    run_session(reqs[1:], SessionConfig(build, memory=ARMS[arm], ledger_model=ledger_model), arm_dir, resume=True,
-                fork_from=(base, 1), **kwargs)
+    run_session(requests_of(session)[1:], SessionConfig(build, memory=ARMS[arm], ledger_model=ledger_model), arm_dir,
+                resume=True, fork_from=(root / "base", 1), **kwargs)
     return arm_dir
 
 
+_print_lock = threading.Lock()
+
+
+def _guarded(name: str, out_dir: Path, fn, log) -> bool:
+    """Run one unit of work with its own prefixed log (also written to out_dir/run.log); a crash is recorded in
+    out_dir/crash.json and does not stop the others. Returns whether it finished."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    logfile = out_dir / "run.log"
+
+    def unit_log(msg: str) -> None:
+        with _print_lock:
+            log(f"[{name}] {msg}")
+            with logfile.open("a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+    try:
+        fn(unit_log)
+        (out_dir / "crash.json").unlink(missing_ok=True)
+        return True
+    except Exception as e:          # one broken unit must not stop the experiment
+        (out_dir / "crash.json").write_text(json.dumps(
+            {"error": repr(e), "traceback": traceback.format_exc()}, indent=1), encoding="utf-8")
+        unit_log(f"!!!!! crashed: {e!r}")
+        return False
+
+
 def run_experiment(sessions: list[dict], arms: dict[str, int], exp_dir: Path, build: BuildConfig,
-                   log=print, **kwargs) -> dict:
-    """Interleaved: every session's repeat 1 of every arm, then repeat 2, ... (so a partial run is balanced)."""
+                   log=print, jobs: int = 1, ledger_model: str = SessionConfig().ledger_model, **kwargs) -> dict:
+    """Phase 1: every session's base turn. Phase 2: every arm, ordered repeat 1 of everything first (so a partial
+    run stays balanced). With jobs > 1 each phase runs that many units at once, in threads: the work is waiting
+    on models and Blender, and every unit has its own Blender process, directory and tracer."""
     exp_dir.mkdir(parents=True, exist_ok=True)
-    for r in range(1, max(arms.values()) + 1):
-        for session in sessions:
-            for arm, n in arms.items():
-                if r > n:
-                    continue
-                arm_dir = exp_dir / session["id"] / f"{arm}_r{r}"
-                log(f"##### {session['id']} {arm} r{r}")
-                try:
-                    run_arm(session, arm, r, exp_dir, build, log=log, **kwargs)
-                    (arm_dir / "crash.json").unlink(missing_ok=True)
-                except Exception as e:          # one broken arm must not stop the experiment
-                    arm_dir.mkdir(parents=True, exist_ok=True)
-                    (arm_dir / "crash.json").write_text(json.dumps(
-                        {"error": repr(e), "traceback": traceback.format_exc()}, indent=1), encoding="utf-8")
-                    log(f"!!!!! {session['id']} {arm} r{r} crashed: {e!r}")
+    common = dict(build=build, ledger_model=ledger_model, **kwargs)
+
+    def pool(units):
+        with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
+            return list(ex.map(lambda u: _guarded(*u, log), units))
+
+    finished = pool([(f"{s['id']} base", exp_dir / s["id"] / "base",
+                      lambda lg, s=s: run_base(s, exp_dir, log=lg, **common)) for s in sessions])
+    ok = {s["id"] for s, done in zip(sessions, finished) if done}
+    units = [(f"{s['id']} {arm} r{r}", exp_dir / s["id"] / f"{arm}_r{r}",
+              lambda lg, s=s, arm=arm, r=r: run_arm(s, arm, r, exp_dir, log=lg, **common))
+             for r in range(1, max(arms.values()) + 1) for s in sessions if s["id"] in ok
+             for arm, n in arms.items() if r <= n]
+    pool(units)
     return score_experiment(sessions, exp_dir)
 
 
@@ -204,6 +238,7 @@ def main() -> None:
     ap.add_argument("--rounds", type=int, default=BuildConfig().rounds)
     ap.add_argument("--coder-budget", type=float, default=SESSION_CODER_BUDGET,
                     help="$ per Coder run (single builds use 0.5; session scripts grow, so edits cost more)")
+    ap.add_argument("--jobs", type=int, default=1, help="arms run at once (each has its own Blender process)")
     ap.add_argument("--score-only", action="store_true")
     args = ap.parse_args()
     sessions = load_sessions(args.file, args.sessions)
@@ -214,7 +249,7 @@ def main() -> None:
         arms = {a: args.repeats or DEFAULT_REPEATS[a] for a in args.arms}
         summary = run_experiment(sessions, arms, exp_dir, BuildConfig(coder_model=args.coder_model, rounds=args.rounds,
                                                                       coder_max_cost_usd=args.coder_budget),
-                                 llm_factory=LLMClient, session_factory=BlenderSession)
+                                 jobs=args.jobs, llm_factory=LLMClient, session_factory=BlenderSession)
     print(render_summary(summary))
 
 
