@@ -7,7 +7,8 @@
   "persist: checks that must keep holding in every later turn (requirement retention).",
   "requires: ids of earlier checks this turn depends on; if one fails, the turn still runs but is scored as 'precondition failed'.",
   "refs: ground truth for references in the request (coreference), used to score reference resolution.",
-  "rubric: atomic yes/no questions for the LLM judge (DSG style); 'dep' = parent question; P* = preservation questions. Not visible to the system."
+  "rubric: atomic yes/no questions for the LLM judge (DSG style); 'dep' = parent question; P* = preservation questions. Not visible to the system.",
+  "2026-10-27: rubric parent questions only ask whether an entity exists (DSG); compass directions are left to the programmatic checks, because the renders have no compass."
  ],
  "sessions": [
   {
@@ -47,7 +48,7 @@
      "touches": ["garden|vegetable|crop|plant|fence|row|cabbage|carrot|lettuce|soil|bed"],
      "persist": ["v2_garden"],
      "rubric": [
-      {"id": "Q1", "q": "Is there a vegetable garden east of the cottage?"},
+      {"id": "Q1", "q": "Is there a vegetable garden?"},
       {"id": "Q2", "q": "Is the garden enclosed by a wooden fence?", "dep": "Q1"},
       {"id": "Q3", "q": "Are there three rows of vegetables inside the fence?", "dep": "Q1"},
       {"id": "Q4", "q": "Is the garden roughly 3 m away from the cottage, not touching it?", "dep": "Q1"},
@@ -152,7 +153,8 @@
      "touches": ["nightstand|night_stand|bedside|lamp|shade|bulb|drawer|knob|handle"],
      "persist": ["b2_stands", "b2_lamp_on_stand"],
      "rubric": [
-      {"id": "Q1", "q": "Are there two nightstands, one on each side of the bed?"},
+      {"id": "Q1", "q": "Are there two nightstands?"},
+      {"id": "Q4", "q": "Is there one nightstand on each side of the bed?", "dep": "Q1"},
       {"id": "Q2", "q": "Do the two nightstands look the same?", "dep": "Q1"},
       {"id": "Q3", "q": "Is there a lamp on top of each nightstand?", "dep": "Q1"},
       {"id": "P1", "q": "Are the bed, floor and walls unchanged?"}
@@ -220,7 +222,8 @@
      "requires": ["b3_painting"],
      "touches": ["painting|picture|frame|canvas|art|mirror|glass"],
      "rubric": [
-      {"id": "Q1", "q": "Is there a round mirror on the wall above the bed?"},
+      {"id": "Q1", "q": "Is there a round mirror?"},
+      {"id": "Q4", "q": "Is the mirror on the wall above the bed?", "dep": "Q1"},
       {"id": "Q2", "q": "Is the painting gone?"},
       {"id": "Q3", "q": "Is the mirror about as wide as the painting was and centred over the headboard?", "dep": "Q1"},
       {"id": "P1", "q": "Are the bed, nightstands, yellow lampshades and rug unchanged?"}
@@ -243,7 +246,8 @@
      "touches": ["*"],
      "persist": ["s1_sidewalk", "s1_road", "s1_light"],
      "rubric": [
-      {"id": "Q1", "q": "Is there an L-shaped sidewalk around a road intersection?"},
+      {"id": "Q1", "q": "Is there a sidewalk along a road intersection?"},
+      {"id": "Q5", "q": "Is the sidewalk L-shaped, wrapping around the corner?", "dep": "Q1"},
       {"id": "Q2", "q": "Is there a curb between the sidewalk and the road?", "dep": "Q1"},
       {"id": "Q3", "q": "Is there a streetlight at the corner of the sidewalk?"},
       {"id": "Q4", "q": "Is the sidewalk raised slightly above the road?", "dep": "Q1"}
@@ -312,7 +316,8 @@
      "touches": ["streetlight|street_light|lamp|light_pole|lamppost|pole|bulb|head"],
      "persist": ["s5_light_on_sidewalk"],
      "rubric": [
-      {"id": "Q1", "q": "Is the streetlight next to the zebra crossing now?"},
+      {"id": "Q1", "q": "Is there a streetlight?"},
+      {"id": "Q4", "q": "Is the streetlight next to the zebra crossing now?", "dep": "Q1"},
       {"id": "Q2", "q": "Is there no longer a streetlight at the sidewalk corner?"},
       {"id": "Q3", "q": "Does the streetlight still stand on the sidewalk, not on the road?", "dep": "Q1"},
       {"id": "P1", "q": "Are the bus shelter, trees, crossing and sidewalk unchanged?"}
@@ -330,7 +335,8 @@
      "requires": ["s3_planters"],
      "touches": ["hydrant|tree|trunk|foliage|leaves|canopy|planter|pot|soil|cap|nozzle|valve"],
      "rubric": [
-      {"id": "Q1", "q": "Is there a red fire hydrant where the middle tree was?"},
+      {"id": "Q1", "q": "Is there a red fire hydrant?"},
+      {"id": "Q4", "q": "Is the hydrant where the middle tree was?", "dep": "Q1"},
       {"id": "Q2", "q": "Are the other two trees still in their original places?"},
       {"id": "Q3", "q": "Does the hydrant stand on the sidewalk?", "dep": "Q1"},
       {"id": "P1", "q": "Are the bus shelter, crossing, moved streetlight and road unchanged?"}

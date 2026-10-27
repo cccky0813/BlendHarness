@@ -82,3 +82,24 @@ def test_judging_an_experiment_is_cached_and_uses_verbatim_requests(tmp_path, se
     res = judge_pairs([SESSION], exp, "gpt-x", "M2", "M0", llm_factory=lambda m, t: pj, log=lambda m: None)
     assert res["n_comparisons"] == 1 and res["wins"]["request"] == {"A": 1}
     assert res["elo"]["request"]["M2"]["elo"] > res["elo"]["request"]["M0"]["elo"]
+
+
+def test_session_rubrics_are_answerable_from_the_renders():
+    """Every dep names a question of the same turn; no question asks a compass direction (the renders have no
+    compass: those are programmatic checks). Smoke 2026-10-27: 'a garden EAST of the cottage' as a parent turned
+    every child into "no"."""
+    import re
+    from eval.run_sessions import load_sessions
+    for s in load_sessions():
+        for k, t in enumerate(s["turns"], 1):
+            ids = {q["id"] for q in t.get("rubric", [])}
+            for q in t.get("rubric", []):
+                assert q.get("dep") in ids | {None}, (s["id"], k, q["id"])
+                assert not re.search(r"\b(east|west|north|south)", q["q"], re.I), (s["id"], k, q["q"])
+
+
+def test_a_failed_turn_is_skipped_not_fatal(tmp_path, sessions):
+    run(tmp_path, sessions, models())
+    out = judge_turns([SESSION], tmp_path / "exp", "gpt-x", ["scores"], llm_factory=lambda m, t: ScriptedLLM([], t),
+                      log=lambda m: None)                                  # every call fails
+    assert len(out["_judge"]["errors"]) == 2 and "M2" not in out          # both arms' turn 2 skipped, run finished

@@ -35,6 +35,7 @@ from blendharness.workflow.session import SessionConfig, run_session  # noqa: E4
 SESSIONS_FILE = Path(__file__).with_name("sessions_draft.json")
 ARMS = {"M0": "history", "M2": "structured", "M3": "retrieval"}
 DEFAULT_REPEATS = {"M0": 2, "M2": 2, "M3": 1}       # design 5.7: M3 answers "how much cheaper", needs fewer samples
+SESSION_CODER_BUDGET = 1.0    # smoke 2026-10-27: turns 4 and 6 hit the 0.5 single-build limit (scripts ~250 lines)
 BASE_MEMORY = "structured"                          # turn 1 is the same for every arm; this one also writes memory.db
 
 
@@ -113,7 +114,7 @@ def score_arm(session: dict, arm_dir: Path) -> dict | None:
                       "results": [asdict(r) for r in s["results"]],
                       "approved": t["approved"], "cost_usd": t["cost_usd"],
                       "coder_input_tokens": coder.get("input_tokens"), "coder_calls": coder.get("calls"),
-                      "unrequested_changes": t.get("unrequested_changes", []),
+                      "unrequested_changes": t.get("unrequested_changes", []), "undeclared": t.get("undeclared", False),
                       "touched_sections": t.get("touched_sections"), "retrieval": t.get("retrieval"),
                       "ledger": t.get("ledger")})
     final = _scene(Path(record["turns"][-1]["run_dir"]), "scene_after.json") if record["turns"] else {"objects": []}
@@ -153,7 +154,8 @@ def aggregate(scores: list[dict]) -> dict:
         "retention_rate": _mean([r["held"] for r in ret]), "retention_checks": len(ret),
         "undecidable_checks": sum(t["undecidable"] for t in edits),
         "critic_approved_rate": _mean([t["approved"] for t in edits]),
-        "unrequested_per_turn": _mean([len(t["unrequested_changes"]) for t in edits]),
+        "unrequested_per_turn": _mean([len(t["unrequested_changes"]) for t in edits if not t["undeclared"]]),
+        "undeclared_turns": sum(t["undeclared"] for t in edits),        # stopped before declare_changes
         "cost_per_turn": _mean([t["cost_usd"] for t in edits]),
         "coder_input_tokens_per_turn": _mean([t["coder_input_tokens"] for t in edits]),
         "retrieval_recall": _mean(recalls),
@@ -177,7 +179,7 @@ def score_experiment(sessions: list[dict], exp_dir: Path) -> dict:
 ROWS = [("completion_rate", "单轮完成率"), ("regression_rate", "回归率（有回归的轮次占比）"),
         ("regressions_per_turn", "每轮回归物体数"), ("retention_rate", "需求保持率"),
         ("critic_approved_rate", "Critic 通过率"), ("unrequested_per_turn", "每轮非请求改动数"),
-        ("cost_per_turn", "每轮成本 $"), ("coder_input_tokens_per_turn", "每轮 Coder 输入 token"),
+        ("undeclared_turns", "未声明就停下的轮数"), ("cost_per_turn", "每轮成本 $"), ("coder_input_tokens_per_turn", "每轮 Coder 输入 token"),
         ("retrieval_recall", "检索 recall（M3）"), ("editing_turns", "编辑轮数"),
         ("precondition_failed", "前置失败轮数"), ("undecidable_checks", "无法判定的检查")]
 
@@ -200,6 +202,8 @@ def main() -> None:
     ap.add_argument("--file", type=Path, default=SESSIONS_FILE)
     ap.add_argument("--coder-model", default=BuildConfig().coder_model)
     ap.add_argument("--rounds", type=int, default=BuildConfig().rounds)
+    ap.add_argument("--coder-budget", type=float, default=SESSION_CODER_BUDGET,
+                    help="$ per Coder run (single builds use 0.5; session scripts grow, so edits cost more)")
     ap.add_argument("--score-only", action="store_true")
     args = ap.parse_args()
     sessions = load_sessions(args.file, args.sessions)
@@ -208,7 +212,8 @@ def main() -> None:
         summary = score_experiment(sessions, exp_dir)
     else:
         arms = {a: args.repeats or DEFAULT_REPEATS[a] for a in args.arms}
-        summary = run_experiment(sessions, arms, exp_dir, BuildConfig(coder_model=args.coder_model, rounds=args.rounds),
+        summary = run_experiment(sessions, arms, exp_dir, BuildConfig(coder_model=args.coder_model, rounds=args.rounds,
+                                                                      coder_max_cost_usd=args.coder_budget),
                                  llm_factory=LLMClient, session_factory=BlenderSession)
     print(render_summary(summary))
 

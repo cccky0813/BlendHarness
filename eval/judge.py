@@ -249,6 +249,7 @@ def judge_turns(sessions: list[dict], exp_dir: Path, model: str, modes: list[str
     tracer = Tracer(exp_dir / "judge_trace", run_id=f"judge_{model}")
     llm = llm_factory(model, tracer)
     per_arm: dict[str, dict] = defaultdict(lambda: {"rubric": [], "scores": []})
+    errors = []
     for session in sessions:
         for arm_dir in _arm_dirs(exp_dir, session):
             dirs = _turn_dirs(arm_dir)
@@ -256,17 +257,22 @@ def judge_turns(sessions: list[dict], exp_dir: Path, model: str, modes: list[str
                 v = turn_view(session, arm_dir, k)
                 arm = arm_dir.name.split("_")[0]
                 questions = session["turns"][k - 1].get("rubric", [])
-                if "rubric" in modes and questions:
-                    r = _cached(dirs[k - 1] / "judge" / f"rubric__{model}.json",
-                                lambda: majority([ask_rubric(llm, v, questions) for _ in range(repeats)]), force)
-                    per_arm[arm]["rubric"].append({"session": session["id"], "turn": k, "answers": r})
-                if "scores" in modes:
-                    s = _cached(dirs[k - 1] / "judge" / f"scores__{model}.json",
-                                lambda: mean_std([ask_scores(llm, v) for _ in range(repeats)]), force)
-                    per_arm[arm]["scores"].append({"session": session["id"], "turn": k, "scores": s})
-                log(f"judged {session['id']} {arm_dir.name} t{k:02d}")
+                try:                    # one failed call (the relay drops out) skips this turn, not the whole run
+                    if "rubric" in modes and questions:
+                        r = _cached(dirs[k - 1] / "judge" / f"rubric__{model}.json",
+                                    lambda: majority([ask_rubric(llm, v, questions) for _ in range(repeats)]), force)
+                        per_arm[arm]["rubric"].append({"session": session["id"], "turn": k, "answers": r})
+                    if "scores" in modes:
+                        s = _cached(dirs[k - 1] / "judge" / f"scores__{model}.json",
+                                    lambda: mean_std([ask_scores(llm, v) for _ in range(repeats)]), force)
+                        per_arm[arm]["scores"].append({"session": session["id"], "turn": k, "scores": s})
+                    log(f"judged {session['id']} {arm_dir.name} t{k:02d}")
+                except Exception as e:
+                    errors.append({"session": session["id"], "arm": arm_dir.name, "turn": k, "error": repr(e)})
+                    log(f"!!! {session['id']} {arm_dir.name} t{k:02d}: {e!r} (rerun to retry; finished turns are cached)")
     summary = {arm: summarize(d) for arm, d in sorted(per_arm.items())}
-    summary["_judge"] = {"model": model, "repeats": repeats, "cost_usd": tracer.summary()["total"].get("cost_usd")}
+    summary["_judge"] = {"model": model, "repeats": repeats, "cost_usd": tracer.summary()["total"].get("cost_usd"),
+                         "errors": errors}
     (exp_dir / f"judge__{model}.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
 
@@ -304,7 +310,11 @@ def judge_pairs(sessions: list[dict], exp_dir: Path, model: str, arm_a: str, arm
             for k in range(2, n + 1):
                 a, b = turn_view(session, a_dir, k, before_views=2), turn_view(session, b_dir, k, before_views=2)
                 path = root / "pairwise" / f"{a_dir.name}_vs_{b_dir.name}_t{k:02d}__{model}.json"
-                v = _cached(path, lambda: compare_swapped(llm, a, b), force)
+                try:
+                    v = _cached(path, lambda: compare_swapped(llm, a, b), force)
+                except Exception as e:
+                    log(f"!!! {session['id']} {a_dir.name} vs {b_dir.name} t{k:02d}: {e!r} (rerun to retry)")
+                    continue
                 verdicts.append({"session": session["id"], "pair": [a_dir.name, b_dir.name], "turn": k, "verdict": v})
                 for d in DIMENSIONS:
                     if v[d] != "invalid":

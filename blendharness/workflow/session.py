@@ -212,6 +212,8 @@ class Session:
                  "status": record["status"], "n_rounds": record["n_rounds"],
                  "cost_usd": record["llm_total"].get("cost_usd", 0.0) + plan_cost,
                  "declared_changes": declared, "unrequested_changes": unrequested,
+                 # the Coder stopped (budget, steps) before declaring: "unrequested" would just list everything
+                 "undeclared": k > 1 and after_script != s.current_script and not declared,
                  "script_changed": after_script != s.current_script}
         if s.current_script:                  # which sections the edit really touched: the ground truth for recall@k
             gold = touched_sections(s.current_script, after_script)

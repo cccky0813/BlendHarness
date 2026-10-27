@@ -58,7 +58,7 @@
 
 **裁判的问题**：
 
-- **Q1** Is there a vegetable garden east of the cottage?
+- **Q1** Is there a vegetable garden?
 - **Q2** Is the garden enclosed by a wooden fence?（依赖 Q1）
 - **Q3** Are there three rows of vegetables inside the fence?（依赖 Q1）
 - **Q4** Is the garden roughly 3 m away from the cottage, not touching it?（依赖 Q1）
@@ -193,7 +193,8 @@
 
 **裁判的问题**：
 
-- **Q1** Are there two nightstands, one on each side of the bed?
+- **Q1** Are there two nightstands?
+- **Q4** Is there one nightstand on each side of the bed?（依赖 Q1）
 - **Q2** Do the two nightstands look the same?（依赖 Q1）
 - **Q3** Is there a lamp on top of each nightstand?（依赖 Q1）
 - **P1** Are the bed, floor and walls unchanged?
@@ -285,7 +286,8 @@
 
 **裁判的问题**：
 
-- **Q1** Is there a round mirror on the wall above the bed?
+- **Q1** Is there a round mirror?
+- **Q4** Is the mirror on the wall above the bed?（依赖 Q1）
 - **Q2** Is the painting gone?
 - **Q3** Is the mirror about as wide as the painting was and centred over the headboard?（依赖 Q1）
 - **P1** Are the bed, nightstands, yellow lampshades and rug unchanged?
@@ -309,7 +311,8 @@
 
 **裁判的问题**：
 
-- **Q1** Is there an L-shaped sidewalk around a road intersection?
+- **Q1** Is there a sidewalk along a road intersection?
+- **Q5** Is the sidewalk L-shaped, wrapping around the corner?（依赖 Q1）
 - **Q2** Is there a curb between the sidewalk and the road?（依赖 Q1）
 - **Q3** Is there a streetlight at the corner of the sidewalk?
 - **Q4** Is the sidewalk raised slightly above the road?（依赖 Q1）
@@ -403,7 +406,8 @@
 
 **裁判的问题**：
 
-- **Q1** Is the streetlight next to the zebra crossing now?
+- **Q1** Is there a streetlight?
+- **Q4** Is the streetlight next to the zebra crossing now?（依赖 Q1）
 - **Q2** Is there no longer a streetlight at the sidewalk corner?
 - **Q3** Does the streetlight still stand on the sidewalk, not on the road?（依赖 Q1）
 - **P1** Are the bus shelter, trees, crossing and sidewalk unchanged?
@@ -427,7 +431,8 @@
 
 **裁判的问题**：
 
-- **Q1** Is there a red fire hydrant where the middle tree was?
+- **Q1** Is there a red fire hydrant?
+- **Q4** Is the hydrant where the middle tree was?（依赖 Q1）
 - **Q2** Are the other two trees still in their original places?
 - **Q3** Does the hydrant stand on the sidewalk?（依赖 Q1）
 - **P1** Are the bus shelter, crossing, moved streetlight and road unchanged?

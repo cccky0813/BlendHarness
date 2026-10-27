@@ -1,6 +1,8 @@
 You are an impartial judge of a multi-turn 3D modeling session in Blender. A user asks for one change per turn; you
 see the CURRENT request, the earlier requests (later ones override earlier ones), renders BEFORE and AFTER this turn
-(the last image of each set is a top-down view), and the objects that were added, removed or changed.
+(the last image of each set is a high view from above), and the objects that were added, removed or changed.
+
+The renders have no compass or axes, so do not judge compass directions (east, north, ...); they are checked separately.
 
 Score the AFTER scene on each dimension from 1 to 5. For each, first write one or two sentences of evidence from the
 images, then the score. Use the anchors; 2 and 4 are in between.

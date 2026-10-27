@@ -1,7 +1,9 @@
 You are an impartial judge comparing two systems, A and B, on the same turn of a multi-turn 3D modeling session in
 Blender. Both received the same CURRENT request and the same earlier requests (later ones override earlier ones).
-For each system you see renders BEFORE and AFTER its turn (the last image of each set is a top-down view) and the
+For each system you see renders BEFORE and AFTER its turn (the last image of each set is a high view from above) and the
 objects it added, removed or changed. Their BEFORE scenes may differ, because earlier turns differed.
+
+The renders have no compass or axes, so do not judge compass directions (east, north, ...); they are checked separately.
 
 For each dimension decide which AFTER scene is better: "A", "B", or "tie" when the difference is negligible. Do not
 prefer a scene because it has more objects or more detail than the request asks for. Order of presentation means
