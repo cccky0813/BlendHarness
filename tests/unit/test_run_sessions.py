@@ -85,3 +85,15 @@ def test_parallel_runs_match_sequential(tmp_path, sessions):
     assert drop(par) == drop(seq) and par["M2"]["sessions"] == 2 and par["M2"]["completion_rate"] == 1.0
     log = (tmp_path / "par" / "stool2" / "M2_r1" / "run.log").read_text()
     assert "=== turn 2" in log and "=== turn 1" not in log            # each unit logs to its own file
+
+
+def test_a_retired_requirement_is_not_counted_as_lost(tmp_path, sessions):
+    lose_leg = [reply(calls=[call("edit_script", "e1", edits=[{"old_string": 'make_mesh("Leg")\n',
+                                                              "new_string": 'make_mesh("Back")\n'}])]),
+                reply(calls=[call("declare_changes", "d1", added=["Back"], modified=[], removed=["Leg"])]), reply("done")]
+    spec = {**SESSION, "turns": [{**SESSION["turns"][0], "persist": ["s1_seat", "s1_leg"]},
+                                 {**SESSION["turns"][1], "retires": ["s1_leg"]}]}      # "replace the leg with a back"
+    m = Models(coder=coder_builds() + lose_leg, critic=[reply(CRITIC_OK)] * 2, ledger=[ledger(["A stool."])])
+    run_experiment([spec], {"M0": 1}, tmp_path / "exp", BUILD, log=lambda x: None, llm_factory=m,
+                   session_factory=sessions, ledger_model="ledger")
+    assert score_experiment([spec], tmp_path / "exp")["M0"]["retention_rate"] == 1.0

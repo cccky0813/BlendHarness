@@ -58,12 +58,22 @@ _SIDES = {"l", "r", "left", "right", "f", "b", "front", "back", "n", "s", "e", "
 
 def instance_key(name: str) -> Optional[str]:
     """What tells this part's instance apart in its name: its side tokens ('Lamp_Base_L', 'Nightstand_L_Drawer_1'
-    -> 'l'), else its first number ('Window_Frame_2', 'Tree2_Foliage' -> '2'), else None (then only touching
-    groups parts). Part indices after a side ('Drawer_1') are ignored, since the side already names the instance."""
+    -> 'l'), else its first run of number tokens ('Window_Frame_2' -> '2', 'Cabbage_0_3' -> '0_3': row 0, plant 3;
+    pilot 2026-10-27, taking only the row merged a whole row), else the first number glued to a word
+    ('Tree2_Fol0' -> '2'), else None (then only touching groups parts). Part indices after a side ('Drawer_1') are
+    ignored, since the side already names the instance."""
     tokens = [t.lower() for t in _TOKENS.split(name) if t]
     sides = [t for t in tokens if t in _SIDES]
     if sides:
         return "side:" + "_".join(sides)
+    run = []
+    for t in tokens:
+        if t.isdigit():
+            run.append(str(int(t)))
+        elif run:
+            break
+    if run:
+        return "num:" + "_".join(run)
     num = re.search(r"\d+", name)
     return "num:" + str(int(num.group(0))) if num else None
 
@@ -171,7 +181,12 @@ def evaluate(check: dict, snapshot: dict) -> CheckResult:
             ok = check.get("min", 0.0) <= d <= check.get("max", float("inf"))
             return res(PASS if ok else FAIL, f"{d:.2f} m {check['dir']}")
         if kind == "contains_xy":
-            ok = all(a["min"][i] <= b["min"][i] + 0.02 and a["max"][i] >= b["max"][i] - 0.02 for i in range(2))
+            covers = lambda i: a["min"][i] <= b["min"][i] + 0.02 and a["max"][i] >= b["max"][i] - 0.02  # noqa: E731
+            if check.get("sides"):     # "sticks out on both SIDES": across B's narrow axis only, overlapping along it
+                narrow = 0 if (b["max"][0] - b["min"][0]) <= (b["max"][1] - b["min"][1]) else 1
+                ok = covers(narrow) and _xy_overlap(a, b)
+            else:
+                ok = covers(0) and covers(1)
             return res(PASS if ok else FAIL, f"A {a['min'][:2]}..{a['max'][:2]} vs B {b['min'][:2]}..{b['max'][:2]}")
 
     if kind == "grounded":

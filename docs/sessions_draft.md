@@ -50,7 +50,7 @@
 - `v2_garden`：存在名字匹配 `garden \| vegetable \| crop \| plant` 的物体
 - `v2_fence`：存在名字匹配 `fence` 的物体
 - `v2_east`：`fence \| garden` 在 `cottage \| house` 的东边 1.5–5.0 m
-- `v2_rows`：`vegetable \| crop \| cabbage \| carrot \| lettuce \| plant \| row` 的**实例**至少 3 个
+- `v2_rows`：`vegetable \| crop \| cabbage \| carrot \| lettuce \| plant` 的**实例**至少 3 个
 
 **只允许改动**：`garden \| vegetable \| crop \| plant \| fence \| row \| cabbage \| carrot \| lettuce \| soil \| bed`
 
@@ -114,7 +114,7 @@
 **程序检查**：
 
 - `v5_no_fence`：**不存在**名字匹配 `fence` 的物体
-- `v5_veg_kept`：`vegetable \| crop \| cabbage \| carrot \| lettuce \| plant \| row` 的**实例**至少 3 个
+- `v5_veg_kept`：`vegetable \| crop \| cabbage \| carrot \| lettuce \| plant` 的**实例**至少 3 个
 
 **只允许改动**：`fence \| post \| rail \| picket`
 
@@ -207,7 +207,7 @@
 
 - `b3_painting`：存在名字匹配 `painting \| picture \| frame \| canvas \| art` 的物体
 - `b3_on_wall`：`painting \| picture \| frame \| canvas \| art` 与 `wall` 的间隙 ≤ 0.05 m
-- `b3_above_bed`：`painting \| picture \| frame \| canvas \| art` 整体在 `headboard` 的上方
+- `b3_above_bed`：`painting \| picture \| canvas \| artwork` 整体在 `headboard` 的上方
 
 **只允许改动**：`painting \| picture \| frame \| canvas \| art`
 

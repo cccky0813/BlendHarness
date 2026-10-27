@@ -59,6 +59,9 @@ def test_instance_keys():
     assert instance_key("Lamp_Base_R") == "side:r"
     assert instance_key("Cottage_WindowFrame_2") == instance_key("Cottage_WindowGlass_2") == "num:2"
     assert instance_key("Tree2_Fol0") == "num:2" and instance_key("Tree_Pine_Trunk") is None
+    # pilot 2026-10-27: row-and-plant numbering; a carrot's root and top are still one plant
+    assert instance_key("Garden_Cabbage_0_3") == "num:0_3" != instance_key("Garden_Cabbage_0_4")
+    assert instance_key("Garden_Carrot_1_0_Root") == instance_key("Garden_Carrot_1_0_Top") == "num:1_0"
 
 
 def test_real_naming_styles_count_right():
@@ -133,3 +136,12 @@ def test_draft_sessions_use_only_known_check_kinds():
     data = json.loads((Path(__file__).resolve().parents[2] / "eval" / "sessions_draft.json").read_text())
     kinds = {kind_of(c) for s in data["sessions"] for t in s["turns"] for c in t["expect"]}
     assert kinds <= set(KINDS)
+
+
+def test_contains_xy_sides_only_needs_the_narrow_axis():
+    """'A rug that sticks out on both sides of the bed': the bed's head is against the wall (pilot 2026-10-27)."""
+    snap = {"objects": [obj("Rug", (-1.3, 0.45, 0), (1.3, 2.5, 0.01)), obj("Bed", (-0.85, 0.92, 0), (0.85, 2.98, 0.6))]}
+    assert evaluate({"id": "c", "contains_xy": ["rug", "bed"]}, snap).status == "fail"
+    assert evaluate({"id": "c", "contains_xy": ["rug", "bed"], "sides": True}, snap).status == "pass"
+    narrow = {"objects": [obj("Rug", (-0.5, 0, 0), (0.5, 3, 0.01)), obj("Bed", (-0.85, 0.92, 0), (0.85, 2.98, 0.6))]}
+    assert evaluate({"id": "c", "contains_xy": ["rug", "bed"], "sides": True}, narrow).status == "fail"

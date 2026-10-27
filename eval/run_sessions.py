@@ -153,8 +153,12 @@ def score_arm(session: dict, arm_dir: Path) -> dict | None:
                       "ledger": t.get("ledger")})
     final = _scene(Path(record["turns"][-1]["run_dir"]), "scene_after.json") if record["turns"] else {"objects": []}
     retention = []
-    for t in session["turns"][:len(record["turns"]) - 1]:          # requirements of every turn before the last
+    done = session["turns"][:len(record["turns"])]
+    retired = {cid for t in done for cid in t.get("retires", [])}  # a later turn changed that requirement on purpose
+    for t in done[:-1]:                                            # requirements of every turn before the last
         for cid in t.get("persist", []):
+            if cid in retired:
+                continue
             was = earlier.get(cid)
             if was is None or was.status != PASS:
                 continue                                           # never held: nothing to retain

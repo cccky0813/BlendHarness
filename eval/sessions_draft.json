@@ -8,7 +8,9 @@
   "requires: ids of earlier checks this turn depends on; if one fails, the turn still runs but is scored as 'precondition failed'.",
   "refs: ground truth for references in the request (coreference), used to score reference resolution.",
   "rubric: atomic yes/no questions for the LLM judge (DSG style); 'dep' = parent question; P* = preservation questions. Not visible to the system.",
-  "2026-10-27: rubric parent questions only ask whether an entity exists (DSG); compass directions are left to the programmatic checks, because the renders have no compass."
+  "2026-10-27: rubric parent questions only ask whether an entity exists (DSG); compass directions are left to the programmatic checks, because the renders have no compass.",
+  "2026-10-27 pilot calibration (checks that failed in every arm, inspected by hand): b3 'frame' also matched Bed_Frame -> dropped; v2/v5 'row' matched the soil beds every plant touches, merging all plants into one instance -> dropped (three ROWS is the rubric's job); b4 the request says 'on both sides', and a bed's head is against the wall -> contains_xy with sides=true; instance keys use the whole run of number tokens (Cabbage_0_3 = row 0, plant 3).",
+  "retires: persist checks a turn changes on purpose (the hydrant replaces the middle tree and its planter); retention skips them from then on."
  ],
  "sessions": [
   {
@@ -43,7 +45,7 @@
       {"id": "v2_garden", "exists": "garden|vegetable|crop|plant"},
       {"id": "v2_fence", "exists": "fence"},
       {"id": "v2_east", "direction": ["fence|garden", "cottage|house"], "dir": "east", "min": 1.5, "max": 5.0},
-      {"id": "v2_rows", "count": "vegetable|crop|cabbage|carrot|lettuce|plant|row", "min": 3}
+      {"id": "v2_rows", "count": "vegetable|crop|cabbage|carrot|lettuce|plant", "min": 3}
      ],
      "touches": ["garden|vegetable|crop|plant|fence|row|cabbage|carrot|lettuce|soil|bed"],
      "persist": ["v2_garden"],
@@ -91,7 +93,7 @@
      "request": "Remove the fence around the garden, but keep the vegetables.",
      "expect": [
       {"id": "v5_no_fence", "absent": "fence"},
-      {"id": "v5_veg_kept", "count": "vegetable|crop|cabbage|carrot|lettuce|plant|row", "min": 3}
+      {"id": "v5_veg_kept", "count": "vegetable|crop|cabbage|carrot|lettuce|plant", "min": 3}
      ],
      "requires": ["v2_fence"],
      "touches": ["fence|post|rail|picket"],
@@ -165,7 +167,7 @@
      "expect": [
       {"id": "b3_painting", "exists": "painting|picture|frame|canvas|art"},
       {"id": "b3_on_wall", "near": ["painting|picture|frame|canvas|art", "wall"], "max_gap": 0.05},
-      {"id": "b3_above_bed", "above": ["painting|picture|frame|canvas|art", "headboard"]}
+      {"id": "b3_above_bed", "above": ["painting|picture|canvas|artwork", "headboard"]}
      ],
      "requires": ["b1_headboard_wall"],
      "touches": ["painting|picture|frame|canvas|art"],
@@ -182,7 +184,7 @@
      "expect": [
       {"id": "b4_rug", "exists": "rug|carpet"},
       {"id": "b4_rug_flat", "grounded": "rug|carpet"},
-      {"id": "b4_rug_under_bed", "contains_xy": ["rug|carpet", "bed|mattress"]}
+      {"id": "b4_rug_under_bed", "contains_xy": ["rug|carpet", "bed|mattress"], "sides": true}
      ],
      "touches": ["rug|carpet"],
      "persist": ["b4_rug"],
@@ -325,6 +327,7 @@
     },
     {
      "request": "Replace the middle tree with a red fire hydrant, keeping the other two trees where they are.",
+    "retires": ["s3_planters"],
      "refs": {"the middle tree": "tree|trunk|planter"},
      "expect": [
       {"id": "s6_hydrant", "exists": "hydrant"},
