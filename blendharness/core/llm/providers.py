@@ -20,15 +20,19 @@ PRICES_PATH = ROOT / "config" / "prices.json"
 # protocol, so one client class covers them; only the URL and key differ.
 PROVIDERS = [
     ("deepseek", "DEEPSEEK"),
-    ("", "OPENAI"),  # fallback: the relay (Claude, GPT, Gemini...)
+    ("gpt", "JUDGE"),     # the offline judge (eval/judge.py): its own key; falls back to the relay if unset
+    ("gemini", "JUDGE"),
+    ("", "OPENAI"),       # fallback: the relay (Claude, GPT, Gemini...)
 ]
 
 
 def provider_env(model: str) -> tuple[str, str]:
+    """The first provider whose model prefix matches AND whose URL and key are set in the environment."""
     for model_prefix, env_prefix in PROVIDERS:
-        if model.startswith(model_prefix):
-            return os.environ[f"{env_prefix}_BASE_URL"], os.environ[f"{env_prefix}_API_KEY"]
-    raise ValueError(f"No provider configured for model {model!r}")
+        url, key = os.environ.get(f"{env_prefix}_BASE_URL"), os.environ.get(f"{env_prefix}_API_KEY")
+        if model.startswith(model_prefix) and url and key:
+            return url, key
+    raise ValueError(f"No provider configured for model {model!r} (set <PROVIDER>_BASE_URL and _API_KEY in .env)")
 
 
 def load_prices() -> dict[str, dict[str, float]]:
