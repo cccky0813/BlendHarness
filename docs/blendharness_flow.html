@@ -70,8 +70,8 @@ td code { white-space: nowrap; }
 <div class="wrap">
   <header>
     <div class="eyebrow">BlendHarness · 系统流程</div>
-    <h1>一次建模从指令到 result.json 的完整过程</h1>
-    <p class="lede">参照 Anthropic《How we built our multi-agent research system》里的 Process diagram 画法：纵向是参与者（生命线），横向箭头是按时间顺序的调用，loop / alt / opt 框表示循环、分支和可选步骤。第一张是一次建模（在线），第二张是从历史失败中学习教训（离线）。</p>
+    <h1>从一次建模到多轮会话：BlendHarness 的完整生命周期</h1>
+    <p class="lede">参照 Anthropic《How we built our multi-agent research system》里的 Process diagram 画法：纵向是参与者（生命线），横向箭头是按时间顺序的调用，loop / alt / opt 框表示循环、分支和可选步骤。第一张是一次建模（在线），第二张是从历史失败中学习教训（离线），第三张是多轮会话里的一轮（每一轮都在内部调用一次图 1），第四张是多轮实验怎么分叉和打分。</p>
   </header>
 
   <section>
@@ -231,13 +231,112 @@ sequenceDiagram
   </section>
 
   <section>
-    <h2>图里的五层防护</h2>
+    <h2>图 3 · 多轮会话的一轮：记忆在建模前后各做一次</h2>
+    <p class="lede">用户每次只给一句修改需求，上一轮结束后才交出下一句。每一轮就是一次图 1 的 run_build，只是起点不再是空场景，而是上一轮的脚本。三种记忆策略只在"Coder 看到什么"上不同：M0 历史原话，M2 账本 + 登记表 + 日志，M3 再加大纲和召回的代码段。</p>
+    <div class="legend">
+      <span><b>opt M2 / M3</b> 结构化记忆才执行</span><span><b>opt M3</b> 只有检索策略才执行</span>
+      <span>账本管理员是<b>单次 LLM 调用</b>（Haiku）；登记表和日志由<b>程序</b>生成，不让 LLM 写摘要</span>
+    </div>
+    <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor U as 用户 / 评测<br/>run_session
+    participant S as Session<br/>workflow/session.py
+    participant LK as 账本管理员<br/>ledger_keeper（Haiku）
+    participant MEM as 会话记忆<br/>memory.db（账本 · 登记表 · 日志 · 向量）
+    participant RT as 切段 + 检索<br/>sections · retrieval
+    participant B as run_build<br/>图 1 整套流程
+    participant CK as 存档<br/>checkpoints/
+
+    U->>S: turn(第 k 轮需求)　上一轮结束后才交出
+    S->>MEM: restore(memory_t{k-1}.db)　从上一轮的副本开始，重跑也不会重复写入
+    opt M2 / M3：更新账本
+        S->>LK: 有效需求 + 登记表 + 最近日志 + 新需求
+        LK-->>S: 提议：新增 · 取代（带理由）· 指代消解
+        S->>S: check_proposal：只能取代有效需求、必须有理由、物体名必须存在<br/>不合格 → 带着问题重试 1 次 → 仍不合格 → 原话加进账本
+        S->>MEM: add_requirement · supersede（落库由程序完成，模型只能提议）
+    end
+    alt M0 历史原话
+        S->>S: turn_texts：早期需求原话编号 + 新需求 + turn_edit 规则
+    else M2 / M3
+        S->>S: structured_texts：账本 + 登记表 + 日志 + "the roof 指 WellRoof"
+    end
+    opt M3：检索代码段
+        S->>RT: 查询 = 需求 + 指代物体 + 它们的材质（来自上一轮快照）
+        RT->>RT: 切段 → BM25 + 向量 → RRF → top k → 补上定义段（def-use）
+        RT->>MEM: 向量缓存：文本没变就不重算
+        RT-->>S: focus：Coder 看大纲 + 这几段原文，其余用 view_section
+    end
+    S->>B: run_build(任务, initial_script = 上一轮脚本, review = 本轮需求 + 早期要求)
+    Note over B: 图 1：round 0 在旧脚本上编辑 → Critic → 修改轮 → Verifier<br/>第 2 轮起 Coder 必须 declare_changes；存 scene_before / after.json
+    B-->>S: record · 改后的脚本 · 声明的改动
+    S->>S: 非请求改动 = 快照前后真的变了 − Coder 声明的<br/>touched_sections = 旧脚本里被改到的段（检索的标准答案，M3 当场算 recall）
+    opt M2 / M3：写回记忆
+        S->>MEM: registry_rows：从改后快照重建登记表 · 追加一行轮次日志
+        S->>CK: memory_tNN.db（下一轮和分叉的起点）
+    end
+    S->>CK: tNN_done.json（脚本 + 每轮记录）· session.json
+    S-->>U: 本轮记录：是否通过 · 成本 · 声明 · 非请求改动 · 账本变化
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>图 3 的分段说明</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>步骤</th><th>阶段</th><th>发生了什么</th><th>代码</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>逐轮输入</td><td>系统只拿到这一轮的需求字符串；评测时 expect、touches、细则清单都留在评测这一侧，系统看不到后面的轮次。</td><td><code>workflow/session.py · run_session</code></td></tr>
+          <tr><td class="num">2</td><td>恢复记忆</td><td>第 k 轮永远从 memory_t{k-1}.db 开始：中途崩溃后重跑，同一条需求不会被加两次（幂等）。</td><td><code>memory/session/store.py · restore</code></td></tr>
+          <tr><td class="num">3–6</td><td>更新账本</td><td>唯一由 LLM 写的记忆，所以要过程序检查；坏回答最多损失拆分的细节，永远不会丢掉需求。</td><td><code>agents/ledger_keeper.py · Session._plan</code></td></tr>
+          <tr><td class="num">7–8</td><td>拼任务文字</td><td>填进 turn_edit.md 模板，放在 user 消息里；系统提示词不变，好让 prompt 缓存命中。</td><td><code>turn_texts · structured_texts</code></td></tr>
+          <tr><td class="num">9–12</td><td>检索（M3）</td><td>按辅助函数和注释代码块切段；向量缓存在同一个 SQLite 里；顺着变量的定义-使用补上定义段，比如"屋顶改红"要找到材质段。</td><td><code>memory/session/sections.py · retrieval.py</code></td></tr>
+          <tr><td class="num">13–14</td><td>建模</td><td>图 1 的整套流程原样复用；新增 declare_changes 工具，M3 下 Coder 上下文末尾钉的是大纲 + 召回的段。</td><td><code>workflow/build.py · agents/coder.py · script_pin</code></td></tr>
+          <tr><td class="num">15</td><td>算结果</td><td>非请求改动由程序对比快照得出，不靠模型自报；touched_sections 按行 diff，改了注释名也能对上，新增的整段代码不算。</td><td><code>unrequested_changes · touched_sections</code></td></tr>
+          <tr><td class="num">16–17</td><td>写回记忆</td><td>登记表每轮从真实快照整体重建，旧记录有错也不会累积；日志一轮一行。</td><td><code>memory/session/views.py · registry_rows · episode_line</code></td></tr>
+          <tr><td class="num">17–19</td><td>存档 + 返回</td><td>两份按轮号对齐的存档：会话状态（JSON）和记忆（SQLite），续跑和分叉时脚本和记忆总是同一轮的；最后把本轮记录交还调用方。</td><td><code>core/session/checkpoint.py · save_copy</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>图 4 · 多轮实验：同一个起点分叉，程序打分，离线裁判</h2>
+    <p class="lede">公平比较三种记忆策略：每个会话的第 1 轮只跑一次，各组都从它分叉，所以起点完全相同，之后只有 Coder 看到的上下文不同。裁判的结论只用来评估，永远不反馈给系统。</p>
+    <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant EV as run_sessions<br/>eval/run_sessions.py
+    participant BASE as base/<br/>第 1 轮
+    participant ARM as M0 · M2 · M3 各组<br/>M2_r1/ …
+    participant SC as 程序打分<br/>expectations · regressions
+    participant JG as LLM 裁判<br/>eval/judge.py（gpt-5.5）
+
+    EV->>BASE: 第 1 阶段：每个会话跑一次第 1 轮（并行 --jobs）
+    EV->>ARM: 第 2 阶段：各组 fork_from(base, 1)，逐轮喂第 2 … 6 轮（并行；单组崩溃只写 crash.json）
+    ARM-->>EV: 每轮的 scene_before / after.json · session.json
+    EV->>SC: 每轮：expect 是否全部通过（完成率）· touches 以外有没有变化（回归）<br/>最后一轮：persist 要求还成不成立（保持率，被推翻的 retires 不算）
+    SC-->>EV: score.json · summary.md
+    EV->>JG: 细则清单（父问题只问实体存不存在）· 6 维打分（先写依据再给分）
+    EV->>JG: 两两比较：同一会话同一轮，交换左右各问一次，两次一致才算赢
+    JG-->>EV: 结果缓存在每轮的 judge/ 下 · Bradley–Terry Elo + 按会话 bootstrap
+    Note over EV,JG: 试点（10/27–28）：先校准了 5 处写错的检查，再看结论
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>图里的六层防护</h2>
     <div class="grid">
       <div class="card"><div class="tag">步骤 17 · sandbox/guard.py</div><h3>沙箱静态检查</h3><p>执行前用 ast 拦截 os、open、eval 和逃逸写法。拦下后错误交还模型，运行继续。</p></div>
       <div class="card"><div class="tag">步骤 11–13、21 · core/rails</div><h3>Rails</h3><p>截断、假装完成、同错重复、超预算。Nudge 提醒再给一步，Stop 结束运行。</p></div>
       <div class="card"><div class="tag">步骤 8 · BudgetGuard</div><h3>上下文预算守卫</h3><p>超过 10 万 token 时从最旧的大段内容开始缩，不删消息，保持工具调用和结果成对。</p></div>
       <div class="card"><div class="tag">步骤 18 · sandbox/session.py</div><h3>看门狗</h3><p>Blender 死循环或崩溃时杀掉进程重启，返回一条错误消息。</p></div>
       <div class="card"><div class="tag">步骤 36 · 图 2 步骤 5</div><h3>准入关卡</h3><p>技能和教训写进长期记忆之前都要过关，按从便宜到贵的顺序检查。</p></div>
+      <div class="card"><div class="tag">图 3 步骤 5 · ledger_keeper</div><h3>记忆写入检查</h3><p>账本管理员只能提议：取代的必须是有效需求且有理由，物体名必须存在；不合格就重试，再不行就把原话加进账本。</p></div>
     </div>
   </section>
 
@@ -247,8 +346,9 @@ sequenceDiagram
       <div class="card"><div class="tag">messages · 一次 run</div><h3>对话状态（短期记忆）</h3><p>每次 coder.run 从零开始，结束就丢弃。模型看到的是它经 Context Engine 加工后的 view。</p></div>
       <div class="card"><div class="tag">BlenderTools · SkillTools 的属性</div><h3>工具世界状态</h3><p>current_script、执行历史、已加载技能。跨轮次保留，存档时同步进 BuildState。</p></div>
       <div class="card"><div class="tag">BuildState · checkpoints/</div><h3>流程状态</h3><p>完成到第几轮、还没修好的问题、锁定的教训。纯 JSON，可以续跑和分叉。</p></div>
+      <div class="card"><div class="tag">SessionState · memory.db</div><h3>会话状态</h3><p>多轮会话跨轮保留：每轮的记录、当前脚本，以及账本、登记表、日志、向量缓存。每轮结束存两份对齐的副本。</p></div>
     </div>
-    <p class="note">长期记忆（skills/、lessons/）在磁盘上，跨建模保留：读在启动和 load_skill 时（步骤 3、16），写在通过后的学习阶段和离线的 reflect.py（步骤 34–38、图 2）。</p>
+    <p class="note">长期记忆（skills/、lessons/）在磁盘上，跨建模保留：读在启动和 load_skill 时（步骤 3、16），写在通过后的学习阶段和离线的 reflect.py（步骤 34–38、图 2）。会话记忆（memory.db）只在一个会话内保留：每轮开始时读（图 3 步骤 2–12），结束时写（步骤 16–17）。</p>
   </section>
 </div>
 
