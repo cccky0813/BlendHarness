@@ -11,7 +11,7 @@
 - **Critic**（视觉评审）根据渲染图挑出问题；
 - **Verifier** 对照修改前后的渲染图，以及场景结构的差异，逐条核实问题是否修好。
 
-通过评审的作品，还可以被提炼成**可自我进化的技能库**，里面是验证过、可复用的建模函数。最终产物是一份普通的 Python 脚本，所以每个物体都可以继续编辑。
+通过评审的作品，还可以被提炼成**可自我进化的技能库**，里面是验证过、可复用的建模函数。最终产物是一份普通的 Python 脚本，所以每个物体都可以继续编辑。场景还支持**多轮编辑**：用户每提一个需求，就在上一轮的脚本上修改，配有分层的会话记忆和程序化的回归检查。
 
 项目思路最初来自 [LL3M 论文](https://arxiv.org/abs/2508.08228)。本仓库**不包含任何 LL3M 代码**：harness、沙箱、Agent、记忆和评测都是从零编写，并根据实测数据重新设计的。
 
@@ -26,7 +26,15 @@
 - **可自我进化的技能库**：Librarian 从通过评审的作品里提炼可复用的函数。每个候选都要通过四道准入关卡（静态检查、去重、沙箱运行、结构检查加视觉检查），没通过的还有一次修复机会。提示词里只列出技能目录，用到时再按需加载。
 - **追踪与评测**：每次 LLM 调用、工具调用和 Agent 运行都是一个 span，记录 token、成本和耗时。评测运行器支持断点续跑和单题崩溃隔离，不同版本交错执行，保证对比公平。
 - **基于轨迹的评测 + 由评测把关的自进化**：把每次历史建模从 trace 还原出来，算出过程指标，并按根因对失败分类。Reflector 把失败案例提炼成经验教训（语义记忆）。但教训只有在没见过的题目上、经过预先注册的 A/B 测试（带安慰剂对照）证明有效，才会被采用。目前还没有通过，所以评测关卡把它挡在了外面（见实验结果）。
-- **测试**：228 个测试，约 7 秒跑完。包括用假 LLM 和假 Blender 跑的单元测试、分层规则测试，以及在真实 Blender 上跑的集成测试。
+- **多轮场景编辑**：会话每轮只交给系统一句需求；每一轮都是一次完整的建模，从上一轮的脚本开始改，从第 2 轮起 Coder 必须声明改了什么。三种记忆策略从同一个起点分叉，可以公平对比：
+  - M0：完整的历史需求原文；
+  - M2 结构化记忆：只追加的需求账本（由 LLM 维护，但必须通过程序检查），加上由程序从真实场景快照生成的场景登记表和轮次日志，存在 SQLite 里；
+  - M3 检索：在 M2 的基础上，用 BM25 + 本地向量 + RRF 检索脚本片段，并顺着变量的定义-使用关系补全。
+- **多轮编辑的两层评测**：
+  - 基于场景快照的程序检查：要求的改动做到了没有、允许范围以外的物体有没有被改动、早期的要求是否还成立；
+  - 离线的 LLM 裁判，用和 Coder 不同家族的模型：带依赖的原子细则问题、带锚点的打分、交换左右的两两比较 + Bradley–Terry Elo。
+  - 先跑试点校准检查器，再看结论。
+- **测试**：286 个测试，约 8 秒跑完。包括用假 LLM 和假 Blender 跑的单元测试、分层规则测试，以及在真实 Blender 上跑的集成测试。
 
 ## 架构
 
@@ -34,7 +42,8 @@
 flowchart TB
     subgraph EVAL[eval/]
         RUN[run_eval.py: tasks x variants x repeats] --> REP[report.py / compare.py]
-        AN[analyze.py] --> ANL[analysis/: trajectories, metrics, failure taxonomy]
+        AN[analyze.py] --> ANL[analysis/: trajectories, metrics, failure taxonomy, expectations]
+        RS[run_sessions.py: sessions x memory strategies] --> JG[judge.py: offline LLM judge]
     end
     subgraph WF[workflow/]
         C0[Coder builds] --> CR[Critic reviews renders]
@@ -44,16 +53,17 @@ flowchart TB
         CR -->|approved| L[learning/: distil + admit skills]
         V -->|passed| L
         CK[(checkpoints after every phase)]
+        SESS[session.py: one build per turn, memory before and after] --> C0
     end
     subgraph AG[agents/]
         CODER[coder: AgentLoop config]
-        SINGLE[critic / verifier / librarian]
+        SINGLE[critic / verifier / librarian / ledger keeper]
         PR[prompts/*.md]
     end
     subgraph TL[tools/ + memory/ + sandbox/]
         BT[BlenderTools: execute / edit / view / inspect / render]
         ST[SkillTools: index / load_skill]
-        MEM[memory/: skills + lessons]
+        MEM[memory/: skills + lessons + session memory]
         SB[sandbox: guard + session <-> server in Blender]
     end
     subgraph CORE[core/]
@@ -67,6 +77,7 @@ flowchart TB
     end
     MCP[protocol/: MCP server] --> TOOLS
     RUN --> WF
+    RS --> SESS
     WF --> AG
     CODER --> BT & ST
     ST --> MEM
@@ -79,11 +90,11 @@ flowchart TB
 |---|---|---|
 | 核心 | `core/` | 通用机制，不涉及任何 Blender 相关内容：`runtime`（Agent 循环）、`rails`、`context_engine`、`tools`（Tool、ToolRegistry）、`llm`、`session`（断点存档）、`tracing` |
 | 沙箱 | `sandbox/` | `server.py` 运行在 Blender **内部**；`session.py` 驱动 Blender 并带看门狗；`guard.py` 做静态检查 |
-| 记忆 | `memory/` | `skills/`：`SkillLibrary`，每个技能一个文件夹（`SKILL.md` + `skill.py` + `stats.json`）；`lessons/`：`LessonLibrary`，从失败中学到的规则 |
-| 分析 | `analysis/` | 从 `trace.jsonl` 和 `result.json` 还原每次建模（Coder 每一轮的运行、工具调用、每个问题跨轮次的生命周期），计算过程指标，按根因对失败分类 |
+| 记忆 | `memory/` | `skills/`：`SkillLibrary`，每个技能一个文件夹（`SKILL.md` + `skill.py` + `stats.json`）；`lessons/`：`LessonLibrary`，从失败中学到的规则；`session/`：多轮会话的记忆，存在 SQLite 里（需求账本、场景登记表、轮次日志、向量缓存），以及脚本切段和检索 |
+| 分析 | `analysis/` | 从 `trace.jsonl` 和 `result.json` 还原每次建模（Coder 每一轮的运行、工具调用、每个问题跨轮次的生命周期），计算过程指标，按根因对失败分类；结构检查和关系检查；`expectations.py`：基于场景快照的多轮程序检查和回归判断 |
 | 工具 | `tools/` | `BlenderTools`（脚本状态，以及执行、编辑、查看、检查）、`scene.py`、`render.py`、`SkillTools` |
-| Agent | `agents/` | 各 Agent 的配置：Coder（提示词 + 工具 + 上下文流水线 + 完成检查）、Critic、Verifier、Librarian；提示词放在 `prompts/*.md` |
-| 编排 | `workflow/` | `run_build`：把建模、评审、修改、核实、提炼技能拆成带断点的阶段；`learning/` 放技能的准入关卡和学习流程，以及教训的准入关卡 |
+| Agent | `agents/` | 各 Agent 的配置：Coder（提示词 + 工具 + 上下文流水线 + 完成检查）、Critic、Verifier、Librarian、Reflector、账本管理员；提示词放在 `prompts/*.md` |
+| 编排 | `workflow/` | `run_build`：把建模、评审、修改、核实、提炼技能拆成带断点的阶段；`session.py`：多轮会话（记忆策略、每轮存档、续跑和分叉）；`learning/` 放技能的准入关卡和学习流程，以及教训的准入关卡 |
 | 协议 | `protocol/` | `blendharness-mcp`：把工具以 MCP Server 的形式开放出去 |
 
 依赖只能单向：`core` ← `sandbox`、`memory` ← `tools` ← `agents` ← `workflow`；`analysis` 只依赖 `core`；`protocol` 只依赖 `tools`。这条规则由 `tests/unit/test_architecture.py` 强制检查。详见 [`docs/architecture.md`](docs/architecture.md)。
@@ -115,11 +126,35 @@ flowchart TB
 
 ![教训学习时序图：历史 trace、分析、Reflector、关卡、教训库和 A/B 评测关卡](docs/diagrams/lessons_loop.zh.png)
 
-图的源码放在 [`docs/diagrams/`](docs/diagrams/)（Mermaid 格式）。修改后运行 `python scripts/render_diagrams.py`，就会用 headless Chrome 重新生成图片。
+图的源码放在 [`docs/diagrams/`](docs/diagrams/)（Mermaid 格式）。修改后运行 `python scripts/render_diagrams.py`，就会用 headless Chrome 重新生成图片。[`docs/blendharness_flow.html`](docs/blendharness_flow.html) 把四张生命周期图放在了一个页面里（一次建模、学习教训、多轮会话的一轮、多轮实验），下载后用浏览器打开即可。
+
+## 多轮场景编辑
+
+真实用户很少一次就把整个场景描述完，而是不断提出修改。这带来了单次建模没有的两个问题：
+- **记忆**：早期的要求不能忘，"那个桶"要能对应到正确的物体；
+- **回归**：改一处不能把别处改坏。回归可以用程序检查。
+
+设计、代码导读和结果见 [`docs/multiturn_design.md`](docs/multiturn_design.md)。
+
+一轮是怎么运行的（`workflow/session.py`）：
+1. 上一轮结束后，下一句需求才交给系统；系统看不到后面的轮次，也看不到评测里写好的期望改动。
+2. 从上一轮的副本恢复记忆，所以重跑中断的一轮，也不会把同一条需求写两次。
+3. （M2 / M3）账本管理员（一次 Haiku 调用）提议新增、取代和指代消解的需求。程序检查这份提议：只能取代有效的需求、必须给出理由、物体名必须存在。不合格就带着问题重试一次，还不合格就把需求原文直接加进账本。写入账本的是程序，不是模型。
+4. 按记忆策略拼出任务文字：M0 列出早期需求原文；M2 给出有效的账本、由程序生成的场景登记表和每轮一行的日志；M3 还会把钉在末尾的整份脚本，换成大纲加上检索出的片段。
+5. 用普通的 `run_build` 在上一轮的脚本上修改，Critic、修改轮和 Verifier 都和单次建模一样；从第 2 轮起，Coder 必须调用 `declare_changes`。
+6. 程序算出非请求改动（快照前后的变化减去 Coder 声明的改动）和这次实际改到的脚本片段（检索的标准答案），从新快照重建登记表，再把会话状态和记忆一起存档。
+
+评测：会话的每一轮都写好了：
+- `expect`：对场景快照的检查；
+- `touches`：这一轮允许改动的物体，其他物体变了就算回归；
+- `persist`：之后要一直成立的要求；
+- 给裁判用的细则清单。
+
+`eval/run_sessions.py` 每个会话的第 1 轮只跑一次，各组都从它分叉，并行运行；`eval/judge.py` 负责 LLM 裁判；`eval/replay_retrieval.py` 在已有的会话记录上离线重放检索，不调用模型。
 
 ## 实验结果
 
-所有数字都来自评测框架，测量于 2026 年 10 月的重构之前（commit `e46c5ab`）。重构保持了行为不变：原有测试一行未改且全部通过，提示词逐字一致，上下文策略也通过了差分测试。Coder 使用 Claude Sonnet，`reasoning_effort` 设为 `low`；Critic、Verifier 和技能评审使用 Claude Haiku。**每个条件只跑了 2 次**，较小的差异应视为随机波动。
+所有数字都来自评测框架。第一张表测量于 2026 年 10 月的重构之前（commit `e46c5ab`），后面各节分别注明了自己的设置。重构保持了行为不变：原有测试一行未改且全部通过，提示词逐字一致，上下文策略也通过了差分测试。Coder 使用 Claude Sonnet，`reasoning_effort` 设为 `low`；Critic、Verifier 和技能评审使用 Claude Haiku。**每个条件只跑了 2 次**，较小的差异应视为随机波动。
 
 | 实验 | 设置 | 结论 |
 |---|---|---|
@@ -135,6 +170,32 @@ flowchart TB
 | 经验教训 | Reflector 读 23 个关系类案例（问题、Critic 建议的修法、Verifier 的判定理由） | 提炼出 9 条教训，例如"部件的位置从它所依附部件的包围盒推出来"、"修位置要改 location 和 rotation，不要只改尺寸"。准入关卡：通用性（引用的案例必须来自至少 2 道题，由我们自己核对）、去重。 |
 | `lessons_ab` | 8 道新题（避开训练题里的物体），有教训 vs 无教训，各 2 次 | 预先注册的主要指标（第一轮的关系类问题数）没有得出结论，原因是**地板效应**：两组各 16 次建模，这类问题一共只有 2 个对 1 个。探索性发现：成本 −24%，Coder 步数 −20%。 |
 | `lessons_confirm` | 预先注册的确认实验：有教训 / 无教训 / **安慰剂**（同样长度的通用建议），各 2 次 | **成本下降没有复现**（有教训 − 无教训：−$0.007，95% 置信区间 [−0.12, +0.11]）。对照组的成本在两个晚上之间差了 34%，比要测的效果还大。因此教训**默认不启用**：评测关卡拒绝了这一步进化。 |
+
+### 修复后的新基线（2026 年 10 月）
+
+修好场景检查器的 bug（见下）、并让 `inspect_scene` 打印包围盒而不是物体原点之后，用 Sonnet（每题 2 次）和 DeepSeek-v4-pro（每题 1 次）交错重跑了 26 道题，共 78 次建模，花费 $21.2。
+- Sonnet 最终通过率 92–100%，第一轮每次建模只有约 0.2–0.3 个空间问题；
+- DeepSeek 的问题多 2–4 倍，主要是材质和形状，成本是 Sonnet 的 40–70%。
+
+所以专门做一个"空间修正模型"，对这条流水线的提升空间很小。下一步因此转向多轮编辑，以及后训练一个小模型。
+
+### 多轮编辑试点（2026 年 10 月）
+
+3 个会话（村庄、卧室、街角，各 6 轮）× M0 两次、M2 两次、M3 一次，共 75 个编辑轮，花费 $48.6。
+
+这是一次**探索性试点**：程序检查是用试点自己的数据校准的。有 5 项检查在所有组都失败，查下来是检查本身写错了，比如 `frame` 把床架 `Bed_Frame` 也匹配进去了；每处修改都记录在会话文件里。所以下面的数字应该理解为"观察到的现象 + 查明的原因"，而不是确认过的效果。
+
+| 指标 | M0 完整历史 | M2 结构化记忆 | M3 + 检索 |
+|---|---|---|---|
+| 单轮完成率（全部检查通过） | 93% | 93% | 73% |
+| 有回归的轮次 | 1/30 | 0/30 | 1/15（133 个物体） |
+| 需求保持率 | 100% | 100% | 100% |
+| 每轮成本 | $0.44 | $0.49 | $0.74 |
+
+- **在短会话里，结构化记忆没有显示出收益**：6 句一句话的需求，原文照抄也不长；所有策略的需求保持率都是 100%，指代也都很直白。两两比较的 LLM 裁判（gpt-5.5，交换左右）也给出了一样的结论：6 个维度里有 5 个以平局为主。组件本身是可用的：45 次账本更新 0 次走兜底，抽查的取代全部正确。
+- **在这个脚本规模下，检索视图得不偿失**：脚本约 5k token，低于设计里切换到大纲的 1.2 万 token 阈值，这次是为了测试强制使用的。Coder 每轮要读 3.8 次代码，还有两次凭记忆重写了整个场景，其中一次造成 133 个回归物体。
+- **检索本身没问题，但混合检索没有带来提升**：在 M2 的轮次上离线重放，recall@3 向量检索 0.76、BM25 0.62、RRF 混合 0.60。
+- **在所有组都失败的检查，多半是检查本身错了**：正式实验之前先跑试点，是值得的。
 
 几点收获：
 - 探索性的好结果，必须经过预先注册的确认实验和安慰剂对照。这是项目里第二次出现"单次实验的效果没复现"。
@@ -163,7 +224,7 @@ cp .env.example .env        # 填写 OPENAI_BASE_URL / OPENAI_API_KEY（如果�
 # Blender 路径默认是 /Applications/Blender.app/Contents/MacOS/Blender，可以用 BLENDER_PATH 覆盖
 ```
 
-模型按名字前缀路由：`deepseek` 开头的模型使用 `DEEPSEEK_*`，其余都使用 `OPENAI_*`。请在 `config/prices.json` 里填写价格（每百万 token 的美元价格），这样成本和预算才能计算。
+模型按名字前缀路由：`deepseek` 开头的使用 `DEEPSEEK_*`；`gpt` / `gemini` 开头的使用 `JUDGE_*`（离线裁判，没配置时退回 `OPENAI_*`）；其余都使用 `OPENAI_*`。检索（M3）需要 `pip install -e ".[retrieval]"`，本地 embedding 模型会在第一次使用时下载到 `models/fastembed/`。请在 `config/prices.json` 里填写价格（每百万 token 的美元价格），这样成本和预算才能计算。
 
 ```bash
 python scripts/smoke_llm.py claude-haiku-4-5     # 测试 API、工具调用和错误记录
@@ -187,12 +248,23 @@ python eval/analyze.py                  # 对全部历史建模算指标、做�
 python scripts/reflect.py --dry-run     # 只列出 Reflector 会读的失败案例，不花钱
 python scripts/reflect.py               # 把教训提炼到 lessons/（用 BuildConfig(lessons_dir=...) 启用）
 
+# 多轮：交互式会话（--memory history / structured / retrieval；--resume 目录；--fork 目录 轮次）
+python scripts/run_session.py --memory structured
+
+# 多轮实验：每个会话的第 1 轮只跑一次，各组从它分叉，用程序检查打分
+python eval/run_sessions.py --exp pilot --jobs 5
+python eval/judge.py --exp pilot --model gpt-5.5 --modes rubric scores
+python eval/judge.py --exp pilot --model gpt-5.5 --pairwise M2 M0
+python eval/replay_retrieval.py runs/sessions/pilot/*/M2_r* --k 1 3 5
+
 # 测试（不调用 API；没装 Blender 时会跳过集成测试）
 python -m pytest
 
 # 把工具开放给 MCP 客户端（Claude Desktop、Claude Code、Cursor），见 docs/mcp.md
 blendharness-mcp
 ```
+
+多轮实验写在 `runs/sessions/<实验名>/<会话>/` 下：`base/`（第 1 轮）、每组一个文件夹（`session.json`、`score.json`、`checkpoints/memory_tNN.db`、`turns/tNN/`，里面有场景快照和裁判结果），以及 `summary.md`。
 
 每次运行会生成 `runs/<run_id>/` 目录，包括：
 - `trace.jsonl`：调用记录摘要
@@ -209,19 +281,22 @@ blendharness-mcp
 blendharness/
   core/        runtime/  rails/  context_engine/  tools/  llm/  session/  tracing/
   sandbox/     server.py  session.py  guard.py
-  memory/      skills/library.py  lessons/library.py
-  analysis/    trajectory.py  metrics.py  taxonomy.py
+  memory/      skills/library.py  lessons/library.py  session/{store,views,sections,retrieval}.py
+  analysis/    trajectory.py  metrics.py  taxonomy.py  structure.py  relations.py  expectations.py
   tools/       blender_tools.py  scene.py  render.py  skill_tools.py
-  agents/      coder.py  critic.py  verifier.py  librarian.py  reflector.py  prompts/*.md
-  workflow/    build.py  state.py  learning/admission.py  learning/learn.py  learning/lessons.py
+  agents/      coder.py  critic.py  verifier.py  librarian.py  reflector.py  ledger_keeper.py  prompts/*.md
+  workflow/    build.py  state.py  session.py  learning/admission.py  learning/learn.py  learning/lessons.py
   protocol/    mcp_server.py
-eval/          run_eval.py  report.py  compare.py  analyze.py  tasks*.json  placebo_lessons/
-scripts/       run_build.py  render_diagrams.py  reflect.py  relearn.py  recost.py  smoke_*.py  demo_loop.py  run_coder.py
+eval/          run_eval.py  report.py  compare.py  analyze.py  run_sessions.py  judge.py  judge_prompts/
+               replay_retrieval.py  audit_structure.py  validate_relations.py  postfix_report.py
+               tasks*.json  sessions_draft.json  placebo_lessons/
+scripts/       run_build.py  run_session.py  walkthrough.py  render_diagrams.py  reflect.py  relearn.py  recost.py  smoke_*.py
 tests/         unit/  integration/  fakes.py
 skills/        学到的技能库
 lessons/       学到的经验教训（默认不启用：没有通过 A/B 关卡）
 config/        prices.json
-docs/          architecture.md  mcp.md  roadmap.md  diagrams/（Mermaid 源码 + PNG）  图片
+docs/          architecture.md  multiturn_design.md  agentic_rl_plan.md  blendharness_flow.html  sessions_draft.md
+               mcp.md  roadmap.md  diagrams/（Mermaid 源码 + PNG）  图片
 ```
 
 ## 局限与后续计划
@@ -232,5 +307,8 @@ docs/          architecture.md  mcp.md  roadmap.md  diagrams/（Mermaid 源码 +
 - **成本**：修改轮的大部分成本来自看不见的思考。下一步：按阶段做模型路由（修改轮使用更便宜的模型或更低的思考强度），以及"先便宜、失败再升级"的级联策略，并与"全部用便宜模型"和"全部用强模型"两种方案对比。
 - **沙箱范围**：进程隔离加静态检查，能拦住现实中常见的情况；但静态检查可以被混淆代码绕过。如果要作为公开服务，需要换成容器隔离。
 - **渲染**：颜色略微偏淡；液面上的高光可能让视觉模型误认出不存在的物体。
+- **多轮试点**：只有 3 个短会话，M3 每个会话只跑了一次，检查器也是在同一批数据上校准的。要测出记忆的价值，需要更长的会话（12 轮以上），并且包含回指很早以前内容、推翻后又恢复的要求。M3 在公平测试之前还要先修：大纲视图下禁止整体重写、压缩过期的读取结果、只在超过长度阈值时才使用大纲。LLM 裁判和 Critic 都还需要和人工标注做校准。
+- **按名字匹配的检查**：程序检查靠物体名匹配，名字起得奇怪就会误判，模型也可能通过改名来钻空子。
+- **下一步：后训练**。计划把一个小模型（Qwen3-1.7B，先 SFT 再 GRPO）训练成场景编辑器，奖励完全由这些程序检查计算（能跑通、要求的改动做到了、回归要扣分）：见 [`docs/agentic_rl_plan.md`](docs/agentic_rl_plan.md)。
 
 更多设计说明见 [`docs/roadmap.md`](docs/roadmap.md)。
