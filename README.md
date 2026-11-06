@@ -4,7 +4,7 @@
 
 [中文说明](README.zh-CN.md)
 
-![Generated examples: a village (test task, built with learned skills), a kitchen corner and a bar stool. Three orbit views and one top view each.](docs/examples.png)
+![Generated examples: a kitchen corner and a bar stool. Three orbit views and one top view each.](docs/examples.png)
 
 Instead of generating meshes directly, a **Coder** agent writes and runs `bpy` scripts in a sandboxed headless Blender, a vision **Critic** reviews the renders, and a **Verifier** checks every requested fix against before/after renders and a structural scene diff. Approved builds can be distilled into a **self-evolving skill library** of verified, reusable modeling functions. The output is a plain Python script, so every object stays editable. Scenes can also be edited over many turns: each user request edits the previous turn's script, with layered session memory and programmatic regression checks.
 
@@ -27,53 +27,7 @@ The original idea comes from the [LL3M paper](https://arxiv.org/abs/2508.08228).
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph EVAL[eval/]
-        RUN[run_eval.py: tasks x variants x repeats] --> REP[report.py / compare.py]
-        AN[analyze.py] --> ANL[analysis/: trajectories, metrics, failure taxonomy, expectations]
-        RS[run_sessions.py: sessions x memory strategies] --> JG[judge.py: offline LLM judge]
-    end
-    subgraph WF[workflow/]
-        C0[Coder builds] --> CR[Critic reviews renders]
-        CR -->|issues| C1[Coder revises]
-        C1 --> V[Verifier: before/after + scene diff]
-        V -->|unresolved only| C1
-        CR -->|approved| L[learning/: distil + admit skills]
-        V -->|passed| L
-        CK[(checkpoints after every phase)]
-        SESS[session.py: one build per turn, memory before and after] --> C0
-    end
-    subgraph AG[agents/]
-        CODER[coder: AgentLoop config]
-        SINGLE[critic / verifier / librarian / ledger keeper]
-        PR[prompts/*.md]
-    end
-    subgraph TL[tools/ + memory/ + sandbox/]
-        BT[BlenderTools: execute / edit / view / inspect / render]
-        ST[SkillTools: index / load_skill]
-        MEM[memory/: skills + lessons + session memory]
-        SB[sandbox: guard + session <-> server in Blender]
-    end
-    subgraph CORE[core/]
-        LOOP[runtime: AgentLoop]
-        RAILS[rails: truncation / completion / stuck / budget]
-        CTX[context_engine: processors + budget guard]
-        TOOLS[tools: Tool + ToolRegistry]
-        LLM[llm: streaming client, retries, cost]
-        SES[session: Checkpointer]
-        TR[tracing: span tree]
-    end
-    MCP[protocol/: MCP server] --> TOOLS
-    RUN --> WF
-    RS --> SESS
-    WF --> AG
-    CODER --> BT & ST
-    ST --> MEM
-    BT --> SB
-    AG --> CORE
-    LOOP --> RAILS & CTX & TOOLS & LLM
-```
+![Architecture: Coder, Blender sandbox and review loop with a skill library on top of the agent harness and evaluation](docs/diagrams/architecture.en.png)
 
 | Layer | Folder (`blendharness/`) | Responsibility |
 |---|---|---|

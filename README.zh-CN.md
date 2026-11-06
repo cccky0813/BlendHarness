@@ -4,7 +4,7 @@
 
 [English](README.md)
 
-![生成效果：村庄（测试题，使用学到的技能生成）、厨房一角、吧台凳。每个场景都有 3 个环绕视角和 1 个俯视角度](docs/examples.png)
+![生成效果：厨房一角、吧台凳。每个场景都有 3 个环绕视角和 1 个俯视角度](docs/examples.png)
 
 本项目不直接生成网格，具体分工如下：
 - **Coder** Agent 在沙箱化的 headless Blender 里编写并执行 `bpy` 脚本；
@@ -38,53 +38,7 @@
 
 ## 架构
 
-```mermaid
-flowchart TB
-    subgraph EVAL[eval/]
-        RUN[run_eval.py: tasks x variants x repeats] --> REP[report.py / compare.py]
-        AN[analyze.py] --> ANL[analysis/: trajectories, metrics, failure taxonomy, expectations]
-        RS[run_sessions.py: sessions x memory strategies] --> JG[judge.py: offline LLM judge]
-    end
-    subgraph WF[workflow/]
-        C0[Coder builds] --> CR[Critic reviews renders]
-        CR -->|issues| C1[Coder revises]
-        C1 --> V[Verifier: before/after + scene diff]
-        V -->|unresolved only| C1
-        CR -->|approved| L[learning/: distil + admit skills]
-        V -->|passed| L
-        CK[(checkpoints after every phase)]
-        SESS[session.py: one build per turn, memory before and after] --> C0
-    end
-    subgraph AG[agents/]
-        CODER[coder: AgentLoop config]
-        SINGLE[critic / verifier / librarian / ledger keeper]
-        PR[prompts/*.md]
-    end
-    subgraph TL[tools/ + memory/ + sandbox/]
-        BT[BlenderTools: execute / edit / view / inspect / render]
-        ST[SkillTools: index / load_skill]
-        MEM[memory/: skills + lessons + session memory]
-        SB[sandbox: guard + session <-> server in Blender]
-    end
-    subgraph CORE[core/]
-        LOOP[runtime: AgentLoop]
-        RAILS[rails: truncation / completion / stuck / budget]
-        CTX[context_engine: processors + budget guard]
-        TOOLS[tools: Tool + ToolRegistry]
-        LLM[llm: streaming client, retries, cost]
-        SES[session: Checkpointer]
-        TR[tracing: span tree]
-    end
-    MCP[protocol/: MCP server] --> TOOLS
-    RUN --> WF
-    RS --> SESS
-    WF --> AG
-    CODER --> BT & ST
-    ST --> MEM
-    BT --> SB
-    AG --> CORE
-    LOOP --> RAILS & CTX & TOOLS & LLM
-```
+![架构图：Coder、Blender 沙箱和评审组成修改闭环，技能库提供复用，底层是 Agent Harness 和评测](docs/diagrams/architecture.zh.png)
 
 | 层 | 目录（`blendharness/`） | 职责 |
 |---|---|---|
