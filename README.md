@@ -124,7 +124,7 @@ Evaluation: each session turn carries `expect` (checks on the scene snapshot), `
 
 ## Results
 
-All numbers come from the eval harness. The first table was measured before the October 2026 restructuring (commit `e46c5ab`), and each later section states its own setup; the restructuring kept behaviour identical, checked by unchanged tests, character-identical prompts and a differential test of the context policy. The coder is Claude Sonnet with `reasoning_effort: low`, and the critic, verifier and skill review use Claude Haiku. Each condition ran **twice**, so treat small differences as noise.
+All numbers come from the eval harness. The first table was measured before the October 2026 restructuring (commit `6d3ed0c`), and each later section states its own setup; the restructuring kept behaviour identical, checked by unchanged tests, character-identical prompts and a differential test of the context policy. The coder is Claude Sonnet with `reasoning_effort: low`, and the critic, verifier and skill review use Claude Haiku. Each condition ran **twice**, so treat small differences as noise.
 
 | Experiment | Setup | Finding |
 |---|---|---|

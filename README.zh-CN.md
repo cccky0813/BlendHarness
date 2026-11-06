@@ -154,7 +154,7 @@ flowchart TB
 
 ## 实验结果
 
-所有数字都来自评测框架。第一张表测量于 2026 年 10 月的重构之前（commit `e46c5ab`），后面各节分别注明了自己的设置。重构保持了行为不变：原有测试一行未改且全部通过，提示词逐字一致，上下文策略也通过了差分测试。Coder 使用 Claude Sonnet，`reasoning_effort` 设为 `low`；Critic、Verifier 和技能评审使用 Claude Haiku。**每个条件只跑了 2 次**，较小的差异应视为随机波动。
+所有数字都来自评测框架。第一张表测量于 2026 年 10 月的重构之前（commit `6d3ed0c`），后面各节分别注明了自己的设置。重构保持了行为不变：原有测试一行未改且全部通过，提示词逐字一致，上下文策略也通过了差分测试。Coder 使用 Claude Sonnet，`reasoning_effort` 设为 `low`；Critic、Verifier 和技能评审使用 Claude Haiku。**每个条件只跑了 2 次**，较小的差异应视为随机波动。
 
 | 实验 | 设置 | 结论 |
 |---|---|---|
